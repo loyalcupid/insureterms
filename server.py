@@ -38,8 +38,8 @@ INSURER_REGISTRY = {
     "hyundai": {
         "name": "현대해상",
         "aliases": ["현대해상", "현대", "하이카"],
-        "type": "landing",
-        "official_url": "https://www.hi.co.kr",
+        "type": "live",
+        "official_url": "https://children.hi.co.kr/bin/CI/ON/CION3200G.jsp",
     },
     "samsung": {
         "name": "삼성화재",
@@ -405,6 +405,155 @@ class DbAdapter:
         return results
 
 
+class HyundaiAdapter:
+    base = "https://children.hi.co.kr"
+    page_url = f"{base}/bin/CI/ON/CION3200G.jsp"
+    ajax_url = f"{base}/ajax.xhi"
+
+    DOC_TYPES = [
+        ("clauApnflId", "보험약관"),
+        ("userMthdApnflId", "사업방법서"),
+        ("prodSmryApnflId", "상품요약서"),
+        ("prodNoteApnflId", "상품설명서"),
+    ]
+
+    @classmethod
+    def search(cls, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        aggregated = []
+        for item in cls.fetch_catalog():
+            item["score"] = score_text(query, item["productName"], item["insuranceType"], item["productCode"])
+            if item["score"] > 0:
+                aggregated.append(item)
+
+        ranked = sorted(
+            aggregated,
+            key=lambda item: (
+                -item["score"],
+                0 if item.get("status") == "판매중" else 1,
+                item["productName"],
+            ),
+        )
+
+        enriched: list[dict[str, Any]] = []
+        for item in ranked[:limit]:
+            documents = cls.fetch_documents(item["rawItem"], item["saleStartDate"], item["saleEndDate"])
+            item["documents"] = documents
+            enriched.append(item)
+        return enriched
+
+    @classmethod
+    def fetch_catalog(cls) -> list[dict[str, Any]]:
+        payload = cls.make_request("HHCA0310M38S", {})
+        response = cls.fetch_json(payload)
+        results: list[dict[str, Any]] = []
+        for sale_key in ["slYProdList", "slNProdList"]:
+            for item in response.get("data", {}).get(sale_key, []):
+                product_name = (item.get("prodNm") or "").strip()
+                if not product_name:
+                    continue
+                sale_start = clean_hi_date(item.get("slStDt"))
+                sale_end = clean_hi_date(item.get("slEdDt"))
+                results.append(
+                    {
+                        "provider": "hyundai",
+                        "insurerName": "현대해상",
+                        "productName": product_name,
+                        "productCode": str(item.get("repInsCd") or item.get("seqno") or ""),
+                        "insuranceType": hi_product_category(item.get("prodCatCd")),
+                        "status": "판매중" if item.get("slYn") == "Y" else "판매중지",
+                        "sourceUrl": cls.page_url,
+                        "documents": [],
+                        "saleStartDate": sale_start,
+                        "saleEndDate": sale_end,
+                        "updatedAt": item.get("regDtm"),
+                        "officialSource": "현대해상 보험상품공시",
+                        "rawItem": item,
+                    }
+                )
+        return results
+
+    @classmethod
+    def fetch_documents(cls, item: dict[str, Any], sale_start: str | None, sale_end: str | None) -> list[dict[str, Any]]:
+        documents: list[dict[str, Any]] = []
+        for field_name, doc_type in cls.DOC_TYPES:
+            apnfl_id = item.get(field_name)
+            if not apnfl_id:
+                continue
+            file_info = cls.fetch_file_info(apnfl_id)
+            file_ext = file_info.get("flExts") or "pdf"
+            file_path = f"{file_info.get('savPath', '')}/{file_info.get('savFileNm', '')}.{file_ext}".replace("//", "/")
+            documents.append(
+                {
+                    "type": doc_type,
+                    "title": file_info.get("originalFileNm") or doc_type,
+                    "url": f"{cls.base}/FileActionServlet/download/0{file_path}",
+                    "previewUrl": f"{cls.base}/FileActionServlet/preview/0{file_path}",
+                    "revisionDate": sale_start,
+                    "saleStartDate": sale_start,
+                    "saleEndDate": sale_end,
+                    "format": (file_info.get("flExts") or "PDF").upper(),
+                }
+            )
+        return documents
+
+    @classmethod
+    def fetch_file_info(cls, apnfl_id: str) -> dict[str, Any]:
+        payload = cls.make_request("HHCA0310M26S", {"apnflId": apnfl_id})
+        response = cls.fetch_json(payload)
+        return response.get("data", {})
+
+    @classmethod
+    def fetch_json(cls, payload: dict[str, Any]) -> dict[str, Any]:
+        raw = fetch_text(
+            cls.ajax_url,
+            method="POST",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Referer": cls.page_url,
+            },
+            encoding="utf-8",
+        )
+        return json.loads(raw)
+
+    @classmethod
+    def make_request(cls, tran_id: str, request_data: dict[str, Any]) -> dict[str, Any]:
+        gid = f"codex{int(time.time() * 1000)}"
+        return {
+            "header": {
+                "gId": gid,
+                "tranId": tran_id,
+                "channelId": "HI-HOME",
+                "clientIp": "127.0.0.1",
+                "menuId": "100221",
+                "loginId": None,
+            },
+            "request": request_data,
+        }
+
+
+def hi_product_category(value: str | None) -> str:
+    if not value:
+        return ""
+    prefix = value[:2]
+    return {
+        "01": "일반보험",
+        "02": "자동차보험",
+        "03": "장기보험",
+        "04": "퇴직보험",
+        "05": "퇴직연금",
+    }.get(prefix, "기타")
+
+
+def clean_hi_date(value: str | None) -> str | None:
+    if not value:
+        return None
+    compact = re.sub(r"[^0-9]", "", value)
+    if len(compact) < 8:
+        return None
+    return f"{compact[:4]}-{compact[4:6]}-{compact[6:8]}"
+
+
 def landing_result(provider_key: str, query: str) -> list[dict[str, Any]]:
     config = INSURER_REGISTRY[provider_key]
     return [
@@ -429,7 +578,7 @@ def landing_result(provider_key: str, query: str) -> list[dict[str, Any]]:
 
 def search_all(raw_query: str) -> dict[str, Any]:
     context = parse_query(raw_query)
-    provider_keys = [context.insurer_key] if context.insurer_key else ["kb", "db"]
+    provider_keys = [context.insurer_key] if context.insurer_key else ["kb", "db", "hyundai"]
     results = []
     errors = []
     for provider_key in provider_keys:
@@ -438,6 +587,8 @@ def search_all(raw_query: str) -> dict[str, Any]:
                 results.extend(KbAdapter.search(context.product_query))
             elif provider_key == "db":
                 results.extend(DbAdapter.search(context.product_query))
+            elif provider_key == "hyundai":
+                results.extend(HyundaiAdapter.search(context.product_query))
             else:
                 results.extend(landing_result(provider_key, context.product_query))
         except Exception as exc:
