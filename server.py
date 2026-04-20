@@ -50,8 +50,20 @@ INSURER_REGISTRY = {
     "meritz": {
         "name": "메리츠화재",
         "aliases": ["메리츠화재", "메리츠", "메리츠손보"],
+        "type": "live",
+        "official_url": "https://store.meritzfire.com/disclosure/product.do",
+    },
+    "hanwhafire": {
+        "name": "한화손해보험",
+        "aliases": ["한화손해보험", "한화손보", "한화화재"],
         "type": "landing",
-        "official_url": "https://www.meritzfire.com",
+        "official_url": "https://www.hwgeneralins.com/notice/ir/product-ing01.do",
+    },
+    "heungkuk": {
+        "name": "흥국화재",
+        "aliases": ["흥국화재", "흥국"],
+        "type": "landing",
+        "official_url": "https://www.heungkukfire.co.kr",
     },
     "hanwha": {
         "name": "한화생명",
@@ -554,6 +566,160 @@ def clean_hi_date(value: str | None) -> str | None:
     return f"{compact[:4]}-{compact[4:6]}-{compact[6:8]}"
 
 
+class MeritzAdapter:
+    base = "https://store.meritzfire.com"
+    menu_url = f"{base}/menuList.do"
+    json_url = f"{base}/json.smart"
+    source_url = f"{base}/disclosure/product.do"
+
+    DOC_TYPE_BY_CODE = {
+        "6102": "보험약관",
+        "6103": "상품요약서",
+        "6104": "사업방법서",
+    }
+
+    @classmethod
+    def search(cls, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        products = []
+        for item in cls.fetch_products():
+            score = score_text(query, item["productName"], item["productCode"], item.get("insuranceType", ""))
+            if score <= 0:
+                continue
+            item["score"] = score
+            products.append(item)
+
+        ranked = sorted(products, key=lambda item: (-item["score"], item["productName"]))
+        enriched = []
+        for item in ranked[:limit]:
+            item["documents"] = cls.fetch_documents(item["documentProductCode"])
+            enriched.append(item)
+        return enriched
+
+    @classmethod
+    def fetch_products(cls) -> list[dict[str, Any]]:
+        payload = cls.make_request("f.cg.de.cm.ce.o.bc.CnsTmBc.retrieveCnsTmInfo", {"tempCdObj": ["2", "4", "6", "5"]})
+        response = cls.fetch_json(cls.json_url, payload)
+        direct_products = response.get("body", {}).get("directPdMngList", [])
+        menu_products = cls.fetch_menu_products()
+        menu_by_code = {item.get("cmCommPdCd"): item for item in menu_products if item.get("cmCommPdCd")}
+
+        results = []
+        for item in direct_products:
+            product_name = item.get("pdNm") or item.get("pdNmSt") or item.get("expoMenuNm")
+            document_product_code = item.get("counselPdCd") or item.get("untPdCd")
+            if not product_name or not document_product_code:
+                continue
+            menu_info = menu_by_code.get(item.get("mktCd")) or menu_by_code.get(item.get("counselPdCd")) or {}
+            results.append(
+                {
+                    "provider": "meritz",
+                    "insurerName": "메리츠화재",
+                    "productName": product_name.strip(),
+                    "productCode": str(item.get("pdCd") or item.get("mktCd") or ""),
+                    "documentProductCode": str(document_product_code),
+                    "insuranceType": item.get("pdNmSt") or "",
+                    "status": "판매중",
+                    "sourceUrl": urllib.parse.urljoin(cls.base, menu_info.get("linkUrl") or "/disclosure/product.do"),
+                    "documents": [],
+                    "saleStartDate": None,
+                    "saleEndDate": None,
+                    "updatedAt": None,
+                    "officialSource": "메리츠화재 상품/약관 공시",
+                }
+            )
+        return unique_by(results, "documentProductCode", "productName")
+
+    @classmethod
+    def fetch_menu_products(cls) -> list[dict[str, Any]]:
+        raw = fetch_text(cls.menu_url, method="POST", data=b"", headers={"Content-Type": "application/x-www-form-urlencoded"})
+        return json.loads(raw).get("list", [])
+
+    @classmethod
+    def fetch_documents(cls, product_code: str) -> list[dict[str, Any]]:
+        payload = cls.make_request("f.cg.he.ct.tm.o.bc.CtrCnfBc.retrievePdfFileLst", {"pdCd": product_code})
+        response = cls.fetch_json(cls.json_url, payload)
+        documents = []
+        for item in response.get("body", {}).get("pdfList", []):
+            doc_type = cls.DOC_TYPE_BY_CODE.get(item.get("cmAtcFileCtgCd"), "문서")
+            encrypted_path = item.get("atcFilePthNm#[E]") or item.get("atcFilePthNm")
+            original_name = item.get("ortxtFileNm") or item.get("atcFileNm") or f"{doc_type}.pdf"
+            if not encrypted_path:
+                continue
+            params = urllib.parse.urlencode(
+                {
+                    "path": encrypted_path,
+                    "id": encrypted_path,
+                    "orgFileName": original_name,
+                    "pdfView": "Y",
+                }
+            )
+            documents.append(
+                {
+                    "type": doc_type,
+                    "title": original_name,
+                    "url": f"{cls.base}/hp/fileDownload.do?{params}",
+                    "revisionDate": None,
+                    "saleStartDate": None,
+                    "saleEndDate": None,
+                    "format": "PDF",
+                }
+            )
+        return documents
+
+    @classmethod
+    def fetch_json(cls, url: str, payload: dict[str, Any]) -> dict[str, Any]:
+        raw = fetch_text(
+            url,
+            method="POST",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json; charset=UTF-8",
+                "Referer": cls.source_url,
+            },
+            encoding="utf-8",
+        )
+        return json.loads(raw)
+
+    @classmethod
+    def make_request(cls, service_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "header": {
+                "encryDivCd": "0",
+                "globId": "",
+                "rcvmsgSrvId": service_id,
+                "resultRcvmsgSrvId": "",
+                "esbIntfId": "",
+                "exsIntfId": "",
+                "ipv6Addr1": "",
+                "ipv6Addr2": "",
+                "teleMsgMacAdr": "",
+                "envirInfoDivCd": "",
+                "firstTranssLcatgBizafairCd": "",
+                "transsLcatgBizafairCd": "",
+                "reqRespnsDivCd": "Q",
+                "syncDivCd": "S",
+                "teleMsgReqDttm": time.strftime("%Y%m%d%H%M%S") + "000",
+                "prcesResultDivCd": "",
+                "teleMsgRespnsDttm": "",
+                "clienTrespnsDttm": "",
+                "handcapLcatgBizafairCd": "",
+                "teleMsgVerDivCd": "",
+                "langDivCd": "KR",
+                "belongGrpCd": "",
+                "empNo": "",
+                "empId": "",
+                "dptCd": "",
+                "hgrkDptCd": "",
+                "nxupDptCd": "",
+                "transGrpCd": "F",
+                "screenId": "",
+                "lowrnkScreenId": "",
+                "resveLet": "",
+            },
+            "body": body,
+        }
+
+
 def landing_result(provider_key: str, query: str) -> list[dict[str, Any]]:
     config = INSURER_REGISTRY[provider_key]
     return [
@@ -578,7 +744,7 @@ def landing_result(provider_key: str, query: str) -> list[dict[str, Any]]:
 
 def search_all(raw_query: str) -> dict[str, Any]:
     context = parse_query(raw_query)
-    provider_keys = [context.insurer_key] if context.insurer_key else ["kb", "db", "hyundai"]
+    provider_keys = [context.insurer_key] if context.insurer_key else ["kb", "db", "hyundai", "meritz"]
     results = []
     errors = []
     for provider_key in provider_keys:
@@ -589,6 +755,8 @@ def search_all(raw_query: str) -> dict[str, Any]:
                 results.extend(DbAdapter.search(context.product_query))
             elif provider_key == "hyundai":
                 results.extend(HyundaiAdapter.search(context.product_query))
+            elif provider_key == "meritz":
+                results.extend(MeritzAdapter.search(context.product_query))
             else:
                 results.extend(landing_result(provider_key, context.product_query))
         except Exception as exc:

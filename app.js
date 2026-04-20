@@ -2,6 +2,7 @@ const suggestedQueries = [
   "\u004b\u0042\uC190\uD574\uBCF4\uD5D8 \uC790\uB140\uBCF4\uD5D8",
   "\u0044\u0042\uC190\uD574\uBCF4\uD5D8 \uC2E4\uC190\uBCF4\uD5D8",
   "\uD604\uB300\uD574\uC0C1 \uC5B4\uB9B0\uC774\uBCF4\uD5D8",
+  "\uBA54\uB9AC\uCE20\uD654\uC7AC \uC2E4\uC190\uC758\uB8CC\uBE44\uBCF4\uD5D8",
   "\uC0BC\uC131\uD654\uC7AC \uAC74\uAC15\uBCF4\uD5D8",
   "\uB86F\uB370\uC190\uD574\uBCF4\uD5D8 \uB3C4\uB2F4\uB3C4\uB2F4\uC790\uB140\uBCF4\uD5D8",
 ];
@@ -12,7 +13,9 @@ const insurers = [
   { key: "hyundai", name: "\uD604\uB300\uD574\uC0C1", aliases: ["\uD604\uB300\uD574\uC0C1", "\uD604\uB300", "\uD558\uC774\uCE74"], officialUrl: "https://children.hi.co.kr/bin/CI/ON/CION3200G.jsp", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0" },
   { key: "samsung", name: "\uC0BC\uC131\uD654\uC7AC", aliases: ["\uC0BC\uC131\uD654\uC7AC", "\uC0BC\uC131"], officialUrl: "https://www.samsungfire.com", coverage: "\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC5F0\uACB0" },
   { key: "lotte", name: "\uB86F\uB370\uC190\uD574\uBCF4\uD5D8", aliases: ["\uB86F\uB370\uC190\uD574\uBCF4\uD5D8", "\uB86F\uB370", "\uB86F\uB370\uC190\uBCF4"], officialUrl: "https://www.lotteins.co.kr", coverage: "\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC5F0\uACB0" },
-  { key: "meritz", name: "\uBA54\uB9AC\uCE20\uD654\uC7AC", aliases: ["\uBA54\uB9AC\uCE20\uD654\uC7AC", "\uBA54\uB9AC\uCE20"], officialUrl: "https://www.meritzfire.com", coverage: "\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC5F0\uACB0" },
+  { key: "meritz", name: "\uBA54\uB9AC\uCE20\uD654\uC7AC", aliases: ["\uBA54\uB9AC\uCE20\uD654\uC7AC", "\uBA54\uB9AC\uCE20", "\uBA54\uB9AC\uCE20\uC190\uBCF4"], officialUrl: "https://store.meritzfire.com/disclosure/product.do", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0" },
+  { key: "hanwhafire", name: "\uD55C\uD654\uC190\uD574\uBCF4\uD5D8", aliases: ["\uD55C\uD654\uC190\uD574\uBCF4\uD5D8", "\uD55C\uD654\uC190\uBCF4", "\uD55C\uD654\uD654\uC7AC"], officialUrl: "https://www.hwgeneralins.com/notice/ir/product-ing01.do", coverage: "\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC5F0\uACB0" },
+  { key: "heungkuk", name: "\uD765\uAD6D\uD654\uC7AC", aliases: ["\uD765\uAD6D\uD654\uC7AC", "\uD765\uAD6D"], officialUrl: "https://www.heungkukfire.co.kr", coverage: "\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC5F0\uACB0" },
   { key: "hanwha", name: "\uD55C\uD654\uC0DD\uBA85", aliases: ["\uD55C\uD654\uC0DD\uBA85", "\uD55C\uD654"], officialUrl: "https://www.hanwhalife.com", coverage: "\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC5F0\uACB0" },
   { key: "kyobo", name: "\uAD50\uBCF4\uC0DD\uBA85", aliases: ["\uAD50\uBCF4\uC0DD\uBA85", "\uAD50\uBCF4"], officialUrl: "https://www.kyobo.com", coverage: "\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC5F0\uACB0" },
 ];
