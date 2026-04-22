@@ -15,7 +15,7 @@ const insurers = [
   { key: "lotte", name: "\uB86F\uB370\uC190\uD574\uBCF4\uD5D8", aliases: ["\uB86F\uB370\uC190\uD574\uBCF4\uD5D8", "\uB86F\uB370", "\uB86F\uB370\uC190\uBCF4"], officialUrl: "https://www.lotteins.co.kr", coverage: "\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC5F0\uACB0" },
   { key: "meritz", name: "\uBA54\uB9AC\uCE20\uD654\uC7AC", aliases: ["\uBA54\uB9AC\uCE20\uD654\uC7AC", "\uBA54\uB9AC\uCE20", "\uBA54\uB9AC\uCE20\uC190\uBCF4"], officialUrl: "https://store.meritzfire.com/disclosure/product.do", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0" },
   { key: "hanwhafire", name: "\uD55C\uD654\uC190\uD574\uBCF4\uD5D8", aliases: ["\uD55C\uD654\uC190\uD574\uBCF4\uD5D8", "\uD55C\uD654\uC190\uBCF4", "\uD55C\uD654\uD654\uC7AC"], officialUrl: "https://www.hwgeneralins.com/notice/ir/product-ing01.do", coverage: "\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC5F0\uACB0" },
-  { key: "heungkuk", name: "\uD765\uAD6D\uD654\uC7AC", aliases: ["\uD765\uAD6D\uD654\uC7AC", "\uD765\uAD6D"], officialUrl: "https://www.heungkukfire.co.kr", coverage: "\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC5F0\uACB0" },
+  { key: "heungkuk", name: "\uD765\uAD6D\uD654\uC7AC", aliases: ["\uD765\uAD6D\uD654\uC7AC", "\uD765\uAD6D"], officialUrl: "https://m.heungkukfire.co.kr/product/insr/CPDIS0001_M00/CPDIS0001_M00.do", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0" },
   { key: "hanwha", name: "\uD55C\uD654\uC0DD\uBA85", aliases: ["\uD55C\uD654\uC0DD\uBA85", "\uD55C\uD654"], officialUrl: "https://www.hanwhalife.com", coverage: "\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC5F0\uACB0" },
   { key: "kyobo", name: "\uAD50\uBCF4\uC0DD\uBA85", aliases: ["\uAD50\uBCF4\uC0DD\uBA85", "\uAD50\uBCF4"], officialUrl: "https://www.kyobo.com", coverage: "\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC5F0\uACB0" },
 ];
@@ -25,8 +25,8 @@ const genericTerms = ["\uBCF4\uD5D8", "\uC57D\uAD00", "\uC0C1\uD488", "\uC694\uC
 const adminCards = [
   {
     title: "\uBCF4\uD5D8\uC0AC\uBCC4 \uBB38\uC11C \uC218\uC9D1 \uD604\uD669",
-    body: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0\uC740 KB\uC190\uD574\uBCF4\uD5D8, DB\uC190\uD574\uBCF4\uD5D8, \uD604\uB300\uD574\uC0C1 \uC5B4\uB311\uD130\uB97C \uC6B0\uC120 \uAD6C\uC131\uD588\uC2B5\uB2C8\uB2E4.",
-    items: ["KB \uC0C1\uC138 \uC57D\uAD00 \uD06C\uB864\uB9C1", "DB \uAC80\uC0C9 API \uC5F0\uACB0", "\uD604\uB300\uD574\uC0C1 \uC804\uCCB4 \uC0C1\uD488\uBAA9\uB85D + PDF \uC5F0\uACB0"],
+    body: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0\uC740 KB\uC190\uD574\uBCF4\uD5D8, DB\uC190\uD574\uBCF4\uD5D8, \uD604\uB300\uD574\uC0C1, \uD765\uAD6D\uD654\uC7AC \uC5B4\uB311\uD130\uB97C \uC6B0\uC120 \uAD6C\uC131\uD588\uC2B5\uB2C8\uB2E4.",
+    items: ["KB \uC0C1\uC138 \uC57D\uAD00 \uD06C\uB864\uB9C1", "DB \uAC80\uC0C9 API \uC5F0\uACB0", "\uD604\uB300\uD574\uC0C1 \uC804\uCCB4 \uC0C1\uD488\uBAA9\uB85D + PDF \uC5F0\uACB0", "\uD765\uAD6D\uD654\uC7AC CSRF \uC138\uC158 + PDF \uD504\uB85D\uC2DC \uC5F0\uACB0"],
   },
   {
     title: "\uB9C1\uD06C \uC804\uB7B5",

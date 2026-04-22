@@ -4,6 +4,7 @@ import json
 import os
 import re
 import time
+import http.cookiejar
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -62,8 +63,8 @@ INSURER_REGISTRY = {
     "heungkuk": {
         "name": "흥국화재",
         "aliases": ["흥국화재", "흥국"],
-        "type": "landing",
-        "official_url": "https://www.heungkukfire.co.kr",
+        "type": "live",
+        "official_url": "https://m.heungkukfire.co.kr/product/insr/CPDIS0001_M00/CPDIS0001_M00.do",
     },
     "hanwha": {
         "name": "한화생명",
@@ -108,7 +109,7 @@ def extract_href(fragment: str) -> str | None:
 
 
 def normalize_text(value: str) -> str:
-    return re.sub(r"[^0-9a-z가-힣]", "", value.lower())
+    return re.sub(r"[^0-9a-z가-힣]", "", str(value or "").lower())
 
 
 def tokenize(value: str) -> list[str]:
@@ -720,6 +721,227 @@ class MeritzAdapter:
         }
 
 
+class HeungkukAdapter:
+    base = "https://m.heungkukfire.co.kr"
+    source_url = f"{base}/product/insr/CPDIS0001_M00/CPDIS0001_M00.do"
+    list_page_url = f"{base}/product/insr/CPDIS0001_M10/CPDIS0001_M10.do"
+    list_api_url = f"{base}/product/insr/CPDIS0001_M10/CPDIS0001_M10_S01.do?getInsGoodsList"
+    detail_api_url = f"{base}/product/insr/CPDIS0001_M01/CPDIS0001_M01_S01.do?selectInsGoods"
+    download_popup_url = f"{base}/product/insr/CPDIS0001_L13/CPDIS0001_L13.do"
+    download_url = f"{base}/common/download.do"
+
+    CATEGORIES = {
+        "001": "의료/건강보험",
+        "002": "자녀보험",
+        "003": "운전자/상해보험",
+        "004": "연금/저축보험",
+        "005": "화재/재물보험",
+        "006": "방카슈랑스",
+        "007": "자동차보험",
+        "008": "단체보험",
+        "009": "여행/레저보험",
+        "010": "다이렉트",
+    }
+
+    @classmethod
+    def search(cls, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        opener, csrf = cls.open_session(cls.list_page_url)
+        products: list[dict[str, Any]] = []
+        for category_code, category_name in cls.CATEGORIES.items():
+            response = cls.fetch_json(
+                opener,
+                cls.list_api_url,
+                {"gubunCd": category_code, "gubunCd2": ""},
+                referer=cls.list_page_url,
+                csrf=csrf,
+            )
+            for item in response.get("resultInfoList", []):
+                product_name = cls.product_name(item)
+                if not product_name:
+                    continue
+                score = score_text(query, product_name, item.get("menuNm", ""), item.get("itemCd", ""), category_name)
+                if score <= 0:
+                    continue
+                products.append(
+                    {
+                        "provider": "heungkuk",
+                        "insurerName": "흥국화재",
+                        "productName": product_name,
+                        "productCode": str(item.get("seq") or ""),
+                        "insuranceType": category_name,
+                        "status": "판매중",
+                        "sourceUrl": cls.detail_page_url(item.get("seq")),
+                        "documents": [],
+                        "saleStartDate": None,
+                        "saleEndDate": None,
+                        "updatedAt": item.get("uptDt") or item.get("regDt"),
+                        "officialSource": "흥국화재 보험상품공시",
+                        "score": score,
+                    }
+                )
+
+        ranked = sorted(unique_by(products, "productCode", "productName"), key=lambda item: (-item["score"], item["productName"]))
+        enriched: list[dict[str, Any]] = []
+        for item in ranked[:limit]:
+            detail = cls.fetch_detail(opener, csrf, item["productCode"])
+            item["documents"] = cls.documents_from_detail(item["productCode"], detail)
+            if detail.get("gubunCd"):
+                item["insuranceType"] = cls.CATEGORIES.get(detail.get("gubunCd"), item["insuranceType"])
+            enriched.append(item)
+        return enriched
+
+    @classmethod
+    def fetch_detail(cls, opener: urllib.request.OpenerDirector, csrf: str, seq: str) -> dict[str, Any]:
+        response = cls.fetch_json(
+            opener,
+            cls.detail_api_url,
+            {"seq": seq},
+            referer=cls.detail_page_url(seq),
+            csrf=csrf,
+        )
+        return response.get("result", {}) or {}
+
+    @classmethod
+    def documents_from_detail(cls, seq: str, detail: dict[str, Any]) -> list[dict[str, Any]]:
+        documents: list[dict[str, Any]] = []
+        for doc_key, doc_type, label in [
+            ("terms", "보험약관", "약관 다운로드"),
+            ("advice", "상품안내장", "안내장 다운로드"),
+        ]:
+            prefix = "terms" if doc_key == "terms" else "advice"
+            saved_name = detail.get(f"{prefix}FileNm")
+            original_name = detail.get(f"{prefix}FileOrgNm")
+            if not saved_name:
+                continue
+            params = urllib.parse.urlencode({"seq": seq, "doc": doc_key})
+            documents.append(
+                {
+                    "type": doc_type,
+                    "title": original_name or label,
+                    "url": f"/api/heungkuk_download?{params}",
+                    "revisionDate": cls.clean_revision(detail.get("uptDt") or detail.get("regDt")),
+                    "saleStartDate": None,
+                    "saleEndDate": None,
+                    "format": "PDF",
+                }
+            )
+        return documents
+
+    @classmethod
+    def download_document(cls, seq: str, doc: str = "terms") -> tuple[bytes, str]:
+        if doc not in {"terms", "advice"}:
+            raise ValueError("지원하지 않는 문서 유형입니다.")
+
+        opener, csrf = cls.open_session(cls.detail_page_url(seq))
+        detail = cls.fetch_detail(opener, csrf, seq)
+        prefix = "terms" if doc == "terms" else "advice"
+        file_path = detail.get(f"{prefix}FilePath")
+        file_name = detail.get(f"{prefix}FileNm")
+        original_name = detail.get(f"{prefix}FileOrgNm") or file_name or "heungkuk_terms.pdf"
+        if not file_path or not file_name:
+            raise FileNotFoundError("흥국화재 공식 사이트에서 해당 문서를 찾지 못했습니다.")
+
+        popup_html = cls.open_text(opener, cls.download_popup_url, referer=cls.detail_page_url(seq))
+        popup_csrf = cls.extract_csrf(popup_html) or csrf
+        form = urllib.parse.urlencode(
+            {
+                "_csrf": popup_csrf,
+                "mode": "View",
+                "filePath": file_path,
+                "fileRealName": original_name,
+                "fileSaveName": file_name,
+                "desYn": "",
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            f"{cls.download_url}?temp={int(time.time() * 1000)}",
+            data=form,
+            method="POST",
+            headers={
+                "User-Agent": USER_AGENT,
+                "Referer": cls.download_popup_url,
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/pdf,application/octet-stream,*/*",
+            },
+        )
+        with opener.open(request, timeout=30) as response:
+            return response.read(), original_name
+
+    @classmethod
+    def fetch_json(
+        cls,
+        opener: urllib.request.OpenerDirector,
+        url: str,
+        payload: dict[str, Any],
+        *,
+        referer: str,
+        csrf: str,
+    ) -> dict[str, Any]:
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            method="POST",
+            headers={
+                "User-Agent": USER_AGENT,
+                "Referer": referer,
+                "Origin": cls.base,
+                "Content-Type": "application/json; charset=UTF-8",
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+                "X-Requested-With": "XMLHttpRequest",
+                "X-CSRF-TOKEN": csrf,
+                "Cache-Control": "no-cache",
+            },
+        )
+        with opener.open(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8", errors="ignore"))
+
+    @classmethod
+    def open_session(cls, page_url: str) -> tuple[urllib.request.OpenerDirector, str]:
+        cookie_jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+        html = cls.open_text(opener, page_url)
+        csrf = cls.extract_csrf(html)
+        if not csrf:
+            raise RuntimeError("흥국화재 공식 사이트의 CSRF 토큰을 확인하지 못했습니다.")
+        return opener, csrf
+
+    @classmethod
+    def open_text(cls, opener: urllib.request.OpenerDirector, url: str, *, referer: str | None = None) -> str:
+        headers = {"User-Agent": USER_AGENT}
+        if referer:
+            headers["Referer"] = referer
+        request = urllib.request.Request(url, headers=headers)
+        with opener.open(request, timeout=30) as response:
+            return response.read().decode("utf-8", errors="ignore")
+
+    @staticmethod
+    def extract_csrf(html: str) -> str | None:
+        meta_match = re.search(r'name="_csrf"\s+content="([^"]+)"', html)
+        if meta_match:
+            return meta_match.group(1)
+        input_match = re.search(r'name="_csrf"\s+value="([^"]+)"', html)
+        return input_match.group(1) if input_match else None
+
+    @staticmethod
+    def product_name(item: dict[str, Any]) -> str:
+        parts = [item.get("goodsNm1"), item.get("goodsNm2"), item.get("goodsNm3")]
+        name = "".join(part.strip() for part in parts if part)
+        return name or (item.get("menuNm") or "").strip()
+
+    @classmethod
+    def detail_page_url(cls, seq: str | int | None) -> str:
+        return f"{cls.base}/product/insr/CPDIS0001_M01/CPDIS0001_M01.do?seq={seq or ''}"
+
+    @staticmethod
+    def clean_revision(value: str | None) -> str | None:
+        if not value:
+            return None
+        compact = re.sub(r"[^0-9]", "", value)
+        if len(compact) < 8:
+            return None
+        return f"{compact[:4]}-{compact[4:6]}-{compact[6:8]}"
+
+
 def landing_result(provider_key: str, query: str) -> list[dict[str, Any]]:
     config = INSURER_REGISTRY[provider_key]
     return [
@@ -744,7 +966,7 @@ def landing_result(provider_key: str, query: str) -> list[dict[str, Any]]:
 
 def search_all(raw_query: str) -> dict[str, Any]:
     context = parse_query(raw_query)
-    provider_keys = [context.insurer_key] if context.insurer_key else ["kb", "db", "hyundai", "meritz"]
+    provider_keys = [context.insurer_key] if context.insurer_key else ["kb", "db", "hyundai", "meritz", "heungkuk"]
     results = []
     errors = []
     for provider_key in provider_keys:
@@ -757,6 +979,8 @@ def search_all(raw_query: str) -> dict[str, Any]:
                 results.extend(HyundaiAdapter.search(context.product_query))
             elif provider_key == "meritz":
                 results.extend(MeritzAdapter.search(context.product_query))
+            elif provider_key == "heungkuk":
+                results.extend(HeungkukAdapter.search(context.product_query))
             else:
                 results.extend(landing_result(provider_key, context.product_query))
         except Exception as exc:
@@ -799,6 +1023,25 @@ class AppHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": "query is required"}, status=400)
                 return
             self.send_json(search_all(query))
+            return
+        if parsed.path in {"/api/download/heungkuk", "/api/heungkuk_download", "/api/heungkuk-download"}:
+            params = urllib.parse.parse_qs(parsed.query)
+            seq = params.get("seq", [""])[0].strip()
+            doc = params.get("doc", ["terms"])[0].strip() or "terms"
+            if not seq:
+                self.send_json({"error": "seq is required"}, status=400)
+                return
+            try:
+                body, filename = HeungkukAdapter.download_document(seq, doc)
+            except Exception as exc:
+                self.send_json({"error": str(exc)}, status=502)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Disposition", f"inline; filename*=UTF-8''{urllib.parse.quote(filename)}")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return
         self.serve_static(parsed.path)
 
