@@ -57,8 +57,8 @@ INSURER_REGISTRY = {
     "hanwhafire": {
         "name": "한화손해보험",
         "aliases": ["한화손해보험", "한화손보", "한화화재"],
-        "type": "landing",
-        "official_url": "https://www.hwgeneralins.com/notice/ir/product-ing01.do",
+        "type": "live",
+        "official_url": "https://m.hwgeneralins.com/product/catalog/product-info.do",
     },
     "heungkuk": {
         "name": "흥국화재",
@@ -721,6 +721,165 @@ class MeritzAdapter:
         }
 
 
+class HanwhaFireAdapter:
+    base = "https://m.hwgeneralins.com"
+    file_base = "https://www.hwgeneralins.com"
+    api_url = f"{base}/smt/prd/cmn/select-ins-gd-info"
+    source_url = f"{base}/product/catalog/product-info.do"
+    CACHE_SECONDS = 600
+    _catalog_cache: tuple[float, list[dict[str, Any]]] | None = None
+
+    PRODUCT_META = {
+        "CA00044001": ("자동차", "한화 자동차보험"),
+        "CA00077001": ("자동차", "ECO마일리지 특약"),
+        "CA00088002": ("자동차", "첨단안전장치특약"),
+        "CA00088003": ("자동차", "커넥티드카 할인특약"),
+        "CA00088004": ("자동차", "안전운전점수할인특약"),
+        "CA00088005": ("자동차", "후측방충돌방지장치 할인특약"),
+        "CA00088006": ("자동차", "어라운드뷰모니터장착 할인특약"),
+        "CA00088007": ("자동차", "헤드업디스플레이장착 할인특약"),
+        "CA00100001": ("자동차", "퍼마일 특별약관(월정산형)"),
+        "FA00045003": ("여행/레저", "해외유학생보험"),
+        "FA00131001": ("기업", "재난배상책임보험"),
+        "LA01381001": ("건강/종합", "한화 더건강한 한아름종합보험 무배당"),
+        "LA01406001": ("건강/종합", "한화실손의료보험(갱신형)"),
+        "LA01416001": ("연금/저축", "골드연금보험"),
+        "LA01988002": ("건강/종합", "한화 시그니처 여성건강보험"),
+        "LA02821001": ("가족", "한화 건강쑥쑥 어린이보험 무배당"),
+    }
+
+    @classmethod
+    def search(cls, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        products = []
+        for item in cls.fetch_catalog():
+            score = score_text(
+                query,
+                item["productName"],
+                item.get("displayName", ""),
+                item.get("insuranceType", ""),
+                item.get("productCode", ""),
+            )
+            if score <= 0:
+                continue
+            item["score"] = score
+            products.append(item)
+
+        return sorted(
+            unique_by(products, "productCode", "productName"),
+            key=lambda item: (-item["score"], 0 if item.get("status") == "판매중" else 1, item["productName"]),
+        )[:limit]
+
+    @classmethod
+    def fetch_catalog(cls) -> list[dict[str, Any]]:
+        cached = cls._catalog_cache
+        now = time.time()
+        if cached and now - cached[0] < cls.CACHE_SECONDS:
+            return [dict(item) for item in cached[1]]
+
+        products: list[dict[str, Any]] = []
+        for product_code, (category, fallback_name) in cls.PRODUCT_META.items():
+            product = cls.fetch_product(product_code)
+            if not product:
+                continue
+            item = cls.to_result(product_code, category, fallback_name, product)
+            if item:
+                products.append(item)
+
+        cls._catalog_cache = (now, products)
+        return [dict(item) for item in products]
+
+    @classmethod
+    def fetch_product(cls, product_code: str) -> dict[str, Any] | None:
+        payload = json.dumps({"insGdcd": product_code}, ensure_ascii=False).encode("utf-8")
+        raw = fetch_text(
+            cls.api_url,
+            method="POST",
+            data=payload,
+            headers={
+                "Origin": cls.base,
+                "Referer": cls.product_url(product_code),
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/plain, */*",
+                "X-SMT-Scr-Url": f"/product/catalog/product-info.do?insGdcd={product_code}",
+            },
+        )
+        response = json.loads(raw)
+        if response.get("code") not in {"00000", None}:
+            return None
+        payload_body = response.get("payload") or {}
+        return payload_body.get("prdCmnInsGd") or None
+
+    @classmethod
+    def to_result(
+        cls,
+        product_code: str,
+        category: str,
+        fallback_name: str,
+        product: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        product_name = (product.get("insGdnm") or product.get("prsGdnm") or fallback_name).strip()
+        if not product_name:
+            return None
+
+        documents = cls.documents_from_product(product_name, product)
+        revision_date = documents[0]["revisionDate"] if documents else cls.extract_revision(product_name)
+        return {
+            "provider": "hanwhafire",
+            "insurerName": "한화손해보험",
+            "productName": product_name,
+            "displayName": product.get("prsGdnm") or product.get("insGdDtnm") or fallback_name,
+            "productCode": product_code,
+            "insuranceType": category,
+            "status": "판매중" if product.get("usYn") == "Y" else "판매중지",
+            "sourceUrl": cls.product_url(product_code),
+            "documents": documents,
+            "saleStartDate": None,
+            "saleEndDate": None,
+            "updatedAt": revision_date,
+            "officialSource": "한화손해보험 모바일 상품공시",
+        }
+
+    @classmethod
+    def documents_from_product(cls, product_name: str, product: dict[str, Any]) -> list[dict[str, Any]]:
+        document_path = product.get("insClaUrlAdr")
+        if not document_path:
+            return []
+        filename = urllib.parse.unquote(str(document_path).rsplit("/", 1)[-1])
+        revision_date = cls.extract_revision(filename) or cls.extract_revision(product_name)
+        return [
+            {
+                "type": "보험약관",
+                "title": filename or f"{product_name} 약관.pdf",
+                "url": cls.official_file_url(str(document_path)),
+                "revisionDate": revision_date,
+                "saleStartDate": None,
+                "saleEndDate": None,
+                "format": "PDF",
+            }
+        ]
+
+    @classmethod
+    def official_file_url(cls, path: str) -> str:
+        if path.startswith("http://") or path.startswith("https://"):
+            return path
+        return cls.file_base + urllib.parse.quote(path, safe="/%()_-.")
+
+    @classmethod
+    def product_url(cls, product_code: str) -> str:
+        return f"{cls.source_url}?insGdcd={urllib.parse.quote(product_code)}"
+
+    @staticmethod
+    def extract_revision(value: str | None) -> str | None:
+        if not value:
+            return None
+        match = re.search(r"(?<!\d)(20)?(\d{2})(0[1-9]|1[0-2])(?!\d)", value)
+        if not match:
+            return None
+        year = match.group(2)
+        month = match.group(3)
+        return f"20{year}-{month}-01"
+
+
 class HeungkukAdapter:
     base = "https://m.heungkukfire.co.kr"
     source_url = f"{base}/product/insr/CPDIS0001_M00/CPDIS0001_M00.do"
@@ -966,7 +1125,7 @@ def landing_result(provider_key: str, query: str) -> list[dict[str, Any]]:
 
 def search_all(raw_query: str) -> dict[str, Any]:
     context = parse_query(raw_query)
-    provider_keys = [context.insurer_key] if context.insurer_key else ["kb", "db", "hyundai", "meritz", "heungkuk"]
+    provider_keys = [context.insurer_key] if context.insurer_key else ["kb", "db", "hyundai", "meritz", "heungkuk", "hanwhafire"]
     results = []
     errors = []
     for provider_key in provider_keys:
@@ -981,6 +1140,8 @@ def search_all(raw_query: str) -> dict[str, Any]:
                 results.extend(MeritzAdapter.search(context.product_query))
             elif provider_key == "heungkuk":
                 results.extend(HeungkukAdapter.search(context.product_query))
+            elif provider_key == "hanwhafire":
+                results.extend(HanwhaFireAdapter.search(context.product_query))
             else:
                 results.extend(landing_result(provider_key, context.product_query))
         except Exception as exc:
