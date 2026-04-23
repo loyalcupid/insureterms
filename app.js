@@ -21,6 +21,8 @@ const insurers = [
   { key: "kyobo", name: "\uAD50\uBCF4\uC0DD\uBA85", aliases: ["\uAD50\uBCF4\uC0DD\uBA85", "\uAD50\uBCF4"], officialUrl: "https://www.kyobo.com", coverage: "\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC5F0\uACB0" },
 ];
 
+const mainInsurerKeys = ["meritz", "db", "kb", "samsung", "heungkuk", "hanwhafire", "hyundai", "lotte"];
+
 const genericTerms = ["\uBCF4\uD5D8", "\uC57D\uAD00", "\uC0C1\uD488", "\uC694\uC57D\uC11C", "\uC0AC\uC5C5\uBC29\uBC95\uC11C", "\uB2E4\uC6B4\uB85C\uB4DC", "\uAC80\uC0C9", "\uCC3E\uAE30", "\uACF5\uC2DC\uC2E4"];
 
 const adminCards = [
@@ -78,6 +80,8 @@ const elements = {
   emptySuggestions: document.getElementById("empty-suggestions"),
   retrySimilar: document.getElementById("retry-similar"),
   suggestedKeywords: document.getElementById("suggested-keywords"),
+  insurerButtons: document.getElementById("insurer-buttons"),
+  productSearchArea: document.getElementById("product-search-area"),
   insurerFilter: document.getElementById("insurer-filter"),
   docTypeFilter: document.getElementById("doc-type-filter"),
   statusFilter: document.getElementById("status-filter"),
@@ -112,6 +116,24 @@ function renderSuggestedKeywords() {
   elements.suggestedKeywords.innerHTML = suggestedQueries.map((query) => `<button class="chip" type="button" data-query="${query}">${query}</button>`).join("");
 }
 
+function renderInsurerButtons() {
+  const orderedInsurers = mainInsurerKeys.map((key) => insurers.find((item) => item.key === key)).filter(Boolean);
+  elements.insurerButtons.innerHTML = orderedInsurers
+    .map(
+      (insurer) => `
+        <button
+          type="button"
+          class="insurer-button ${state.selectedInsurer?.key === insurer.key ? "active" : ""}"
+          data-select-insurer="${insurer.key}"
+        >
+          <span>${insurer.name}</span>
+          <small>${insurer.coverage}</small>
+        </button>
+      `
+    )
+    .join("");
+}
+
 function renderAdmin() {
   elements.adminGrid.innerHTML = adminCards
     .map((card) => `<article class="admin-panel"><h4>${card.title}</h4><p class="admin-meta">${card.body}</p><ul>${card.items.map((item) => `<li>${item}</li>`).join("")}</ul></article>`)
@@ -122,14 +144,18 @@ function renderSelectedInsurer() {
   if (!state.selectedInsurer) {
     elements.selectedInsurer.classList.add("hidden");
     elements.selectedInsurer.innerHTML = "";
+    elements.productSearchArea.classList.add("hidden");
+    renderInsurerButtons();
     return;
   }
   elements.selectedInsurer.classList.remove("hidden");
+  elements.productSearchArea.classList.remove("hidden");
   elements.selectedInsurer.innerHTML = `
     <span class="pill">${state.selectedInsurer.name} \uC120\uD0DD\uB428</span>
-    <span class="helper-text">\uC774\uC81C \uC0C1\uD488\uBA85\uC744 \uC774\uC5B4\uC11C \uC785\uB825\uD558\uBA74 \uD574\uB2F9 \uBCF4\uD5D8\uC0AC \uAE30\uC900\uC73C\uB85C \uAC80\uC0C9\uD569\uB2C8\uB2E4.</span>
+    <span class="helper-text">${state.selectedInsurer.name} \uC0C1\uD488\uBA85\uC758 \uC77C\uBD80\uB9CC \uC785\uB825\uD574\uB3C4 \uC720\uC0AC\uD55C \uC57D\uAD00\uC744 \uCC3E\uC2B5\uB2C8\uB2E4.</span>
     <button type="button" class="chip" data-clear-insurer="true">\uC120\uD0DD \uD574\uC81C</button>
   `;
+  renderInsurerButtons();
 }
 
 function stripGenericTerms(text) {
@@ -173,6 +199,14 @@ function isInsurerOnlyQuery(query) {
   }
   stripped = stripGenericTerms(stripped);
   return !stripped;
+}
+
+function stripInsurerName(query, insurer) {
+  let stripped = query;
+  for (const alias of [insurer.name, ...insurer.aliases]) {
+    stripped = stripped.replace(new RegExp(alias, "ig"), " ");
+  }
+  return stripGenericTerms(stripped);
 }
 
 function toInsurerResult(insurer) {
@@ -250,7 +284,8 @@ function searchProducts(query) {
 
 function renderResults() {
   const hasResults = state.results.length > 0;
-  elements.queryDisplay.textContent = state.query ? LABELS.searched(state.query) : LABELS.searching;
+  const displayQuery = [state.selectedInsurer?.name, state.query].filter(Boolean).join(" ");
+  elements.queryDisplay.textContent = displayQuery ? LABELS.searched(displayQuery) : LABELS.searching;
   elements.resultCount.textContent = `${state.results.length}\uAC74`;
   elements.resultsTitle.textContent = hasResults ? LABELS.resultTitle : LABELS.noResultTitle;
   elements.emptyState.classList.toggle("hidden", hasResults);
@@ -376,6 +411,15 @@ async function handleSearch(query) {
   }
 
   renderSelectedInsurer();
+  if (!state.selectedInsurer) {
+    state.rawResults = [];
+    state.results = [];
+    state.selectedProductId = null;
+    buildFilters();
+    renderResults();
+    renderDetail();
+    return;
+  }
   const insurerOnly = isInsurerOnlyQuery(state.query);
   if (insurerOnly) {
     state.rawResults = findMatchingInsurers(state.query).map(toInsurerResult);
@@ -407,8 +451,17 @@ function bindEvents() {
     if (!(target instanceof HTMLElement)) return;
 
     if (target.dataset.query) {
-      elements.input.value = target.dataset.query;
-      handleSearch(target.dataset.query);
+      const matchedInsurer = findMatchingInsurers(target.dataset.query)[0] || null;
+      if (matchedInsurer) {
+        state.selectedInsurer = matchedInsurer;
+        const productQuery = stripInsurerName(target.dataset.query, matchedInsurer);
+        elements.input.value = productQuery;
+        renderSelectedInsurer();
+        handleSearch(productQuery);
+      } else {
+        elements.input.value = target.dataset.query;
+        handleSearch(target.dataset.query);
+      }
       document.getElementById("results-section").scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
@@ -422,20 +475,32 @@ function bindEvents() {
 
     if (target.dataset.selectInsurer) {
       state.selectedInsurer = insurers.find((item) => item.key === target.dataset.selectInsurer) || null;
+      state.query = "";
+      state.rawResults = [];
+      state.results = [];
+      state.selectedProductId = null;
+      buildFilters();
       renderSelectedInsurer();
+      renderResults();
+      renderDetail();
       if (state.selectedInsurer) {
-        elements.input.value = `${state.selectedInsurer.name} `;
+        elements.input.value = "";
         elements.input.focus();
-        elements.input.setSelectionRange(elements.input.value.length, elements.input.value.length);
       }
       return;
     }
 
     if (target.dataset.clearInsurer) {
       state.selectedInsurer = null;
+      state.query = "";
+      state.rawResults = [];
+      state.results = [];
+      state.selectedProductId = null;
+      buildFilters();
       renderSelectedInsurer();
+      renderResults();
+      renderDetail();
       elements.input.value = "";
-      elements.input.focus();
     }
   });
 
@@ -458,6 +523,7 @@ function bindEvents() {
 
 function init() {
   renderSuggestedKeywords();
+  renderInsurerButtons();
   renderAdmin();
   fillSelect(elements.insurerFilter, [LABELS.all]);
   fillSelect(elements.docTypeFilter, [LABELS.all]);
@@ -466,7 +532,6 @@ function init() {
   renderResults();
   renderDetail();
   bindEvents();
-  handleSearch("DB\uC190\uD574\uBCF4\uD5D8 \uC2E4\uC190");
 }
 
 init();

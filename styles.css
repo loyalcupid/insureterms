@@ -177,6 +177,58 @@ h3 {
   font-weight: 700;
 }
 
+.insurer-picker {
+  display: grid;
+  gap: 10px;
+}
+
+.insurer-button-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.insurer-button {
+  min-height: 86px;
+  padding: 16px;
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  text-align: left;
+  border: 1px solid rgba(13, 107, 95, 0.16);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text);
+}
+
+.insurer-button span {
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.insurer-button small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.insurer-button:hover,
+.insurer-button.active {
+  background: linear-gradient(135deg, var(--primary), #208978);
+  color: white;
+  border-color: transparent;
+}
+
+.insurer-button:hover small,
+.insurer-button.active small {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.product-search-area {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(38, 25, 13, 0.08);
+}
+
 input,
 select,
 button,
@@ -477,7 +529,8 @@ button:hover,
   .results-grid,
   .filters,
   .admin-grid,
-  .stat-grid {
+  .stat-grid,
+  .insurer-button-grid {
     grid-template-columns: 1fr;
   }
 
