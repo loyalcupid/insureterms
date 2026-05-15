@@ -1,12 +1,4 @@
-const suggestedQueries = [
-  "\u004b\u0042\uC190\uD574\uBCF4\uD5D8 \uC790\uB140\uBCF4\uD5D8",
-  "\u0044\u0042\uC190\uD574\uBCF4\uD5D8 \uC2E4\uC190\uBCF4\uD5D8",
-  "\uD604\uB300\uD574\uC0C1 \uC5B4\uB9B0\uC774\uBCF4\uD5D8",
-  "\uD55C\uD654\uC190\uD574\uBCF4\uD5D8 \uC5B4\uB9B0\uC774\uBCF4\uD5D8",
-  "\uBA54\uB9AC\uCE20\uD654\uC7AC \uC2E4\uC190\uC758\uB8CC\uBE44\uBCF4\uD5D8",
-  "\uC0BC\uC131\uD654\uC7AC \uAC74\uAC15\uBCF4\uD5D8",
-  "\uB86F\uB370\uC190\uD574\uBCF4\uD5D8 \uB3C4\uB2F4\uB3C4\uB2F4\uC790\uB140\uBCF4\uD5D8",
-];
+const suggestedQueries = [];
 
 const insurers = [
   { key: "kb", name: "KB\uC190\uD574\uBCF4\uD5D8", aliases: ["kb", "kb\uC190\uD574\uBCF4\uD5D8", "kb\uC190\uBCF4", "\uCF00\uC774\uBE44"], officialUrl: "https://www.kbinsure.co.kr/CG802030001.ecs", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0" },
@@ -113,6 +105,7 @@ function fillSelect(select, values) {
 }
 
 function renderSuggestedKeywords() {
+  if (!elements.suggestedKeywords) return;
   elements.suggestedKeywords.innerHTML = suggestedQueries.map((query) => `<button class="chip" type="button" data-query="${query}">${query}</button>`).join("");
 }
 
@@ -135,6 +128,7 @@ function renderInsurerButtons() {
 }
 
 function renderAdmin() {
+  if (!elements.adminGrid) return;
   elements.adminGrid.innerHTML = adminCards
     .map((card) => `<article class="admin-panel"><h4>${card.title}</h4><p class="admin-meta">${card.body}</p><ul>${card.items.map((item) => `<li>${item}</li>`).join("")}</ul></article>`)
     .join("");
@@ -291,7 +285,9 @@ function renderResults() {
   elements.emptyState.classList.toggle("hidden", hasResults);
   if (!hasResults) {
     elements.resultsContainer.innerHTML = "";
-    elements.emptySuggestions.innerHTML = suggestedQueries.map((query) => `<button class="chip" type="button" data-query="${query}">${query}</button>`).join("");
+    if (elements.emptySuggestions) {
+      elements.emptySuggestions.innerHTML = suggestedQueries.map((query) => `<button class="chip" type="button" data-query="${query}">${query}</button>`).join("");
+    }
     return;
   }
   elements.resultsContainer.innerHTML = state.results
@@ -516,9 +512,11 @@ function bindEvents() {
     });
   });
 
-  elements.retrySimilar.addEventListener("click", () => {
-    elements.emptySuggestions.scrollIntoView({ behavior: "smooth", block: "center" });
-  });
+  if (elements.retrySimilar && elements.emptySuggestions) {
+    elements.retrySimilar.addEventListener("click", () => {
+      elements.emptySuggestions.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
 }
 
 function init() {

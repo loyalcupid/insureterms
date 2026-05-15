@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>운영 현황 보기</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=SUIT:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="hero" id="hero">
+        <nav class="topbar">
+          <div class="brand">
+            <img class="brand-image" src="./brand-title-reference.png" alt="보험약관 바로찾기" />
+          </div>
+          <a class="ghost-link" href="./index.html">메인으로 돌아가기</a>
+        </nav>
+
+        <section class="hero-grid">
+          <div class="hero-copy">
+            <p class="badge">내부 운영 페이지</p>
+            <h2>보험사별 문서 수집과 검색 흐름을 점검하는 운영 전용 화면입니다.</h2>
+            <p class="hero-description">
+              현재 연결된 보험사, 링크 전략, 검색 구조, 다음 확장 우선순위를 한 번에 확인할 수 있도록 분리했습니다.
+            </p>
+          </div>
+        </section>
+      </header>
+
+      <main>
+        <section class="section" id="admin-section">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">내부 운영 화면</p>
+              <h3>보험사별 문서 수집과 검색 실패 현황</h3>
+            </div>
+          </div>
+          <div class="admin-grid" id="admin-grid">
+            <article class="admin-panel">
+              <h4>보험사별 문서 수집 현황</h4>
+              <p class="admin-meta">실제 크롤링 연결은 KB손해보험, DB손해보험, 현대해상, 흥국화재, 한화손해보험 어댑터를 우선 구성했습니다.</p>
+              <ul>
+                <li>KB 상세 약관 크롤링</li>
+                <li>DB 검색 API 연결</li>
+                <li>현대해상 전체 상품목록 + PDF 연결</li>
+                <li>흥국화재 CSRF 세션 + PDF 프록시 연결</li>
+                <li>한화손해보험 모바일 상품 API + PDF 연결</li>
+              </ul>
+            </article>
+
+            <article class="admin-panel">
+              <h4>링크 전략</h4>
+              <p class="admin-meta">초기 MVP는 공식 문서 URL 연결을 우선하고 공식 출처 표시를 유지합니다.</p>
+              <ul>
+                <li>KB: CG802030003.ec</li>
+                <li>DB: cYakgwanDown.do</li>
+                <li>공식 공시실 바로가기</li>
+              </ul>
+            </article>
+
+            <article class="admin-panel">
+              <h4>검색 흐름</h4>
+              <p class="admin-meta">보험사 선택 후 상품명 키워드를 입력하면 각 보험사 공식 검색 구조로 검색을 보냅니다.</p>
+              <ul>
+                <li>보험사 선택형 진입</li>
+                <li>상품명 키워드 정리</li>
+                <li>결과 랭킹 후 상세 확장</li>
+              </ul>
+            </article>
+
+            <article class="admin-panel">
+              <h4>다음 확장</h4>
+              <p class="admin-meta">삼성화재, 롯데손해보험 등은 공시실 구조 분석을 이어서 추가 어댑터를 붙이면 됩니다.</p>
+              <ul>
+                <li>보험사별 전용 어댑터</li>
+                <li>정기 링크 검증</li>
+                <li>캐시/인덱스 추가</li>
+              </ul>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
