@@ -70,19 +70,13 @@ body {
 .brand {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 22px;
 }
 
-.brand-mark {
-  width: 52px;
-  height: 52px;
-  border-radius: 18px;
-  display: grid;
-  place-items: center;
-  background: linear-gradient(135deg, var(--primary), #2e8f7d);
-  color: white;
-  font-size: 1.5rem;
-  font-weight: 800;
+.brand-image {
+  display: block;
+  width: min(820px, 100%);
+  height: auto;
 }
 
 .eyebrow {
@@ -99,15 +93,11 @@ p {
   margin: 0;
 }
 
-h1 {
-  font-size: 1.4rem;
-}
-
 h2 {
   margin-top: 20px;
-  font-size: clamp(2.1rem, 5vw, 4rem);
-  line-height: 1.05;
-  max-width: 10.5em;
+  font-size: clamp(1.05rem, 2.5vw, 2rem);
+  line-height: 1.2;
+  max-width: 18em;
 }
 
 h3 {
@@ -124,8 +114,12 @@ h3 {
 .hero-grid {
   margin-top: 28px;
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 24px;
+}
+
+.hero-copy {
+  max-width: 1040px;
 }
 
 .badge {
@@ -539,6 +533,10 @@ button:hover,
   .section-head {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .brand-image {
+    width: min(100%, 560px);
   }
 
   h2 {
