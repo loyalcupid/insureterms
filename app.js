@@ -445,32 +445,42 @@ function bindEvents() {
   document.body.addEventListener("click", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
+    const queryTarget = target.closest("[data-query]");
+    const selectProductTarget = target.closest("[data-select-product]");
+    const selectInsurerTarget = target.closest("[data-select-insurer]");
+    const clearInsurerTarget = target.closest("[data-clear-insurer]");
 
-    if (target.dataset.query) {
-      const matchedInsurer = findMatchingInsurers(target.dataset.query)[0] || null;
+    if (queryTarget instanceof HTMLElement) {
+      const { query } = queryTarget.dataset;
+      if (!query) return;
+      const matchedInsurer = findMatchingInsurers(query)[0] || null;
       if (matchedInsurer) {
         state.selectedInsurer = matchedInsurer;
-        const productQuery = stripInsurerName(target.dataset.query, matchedInsurer);
+        const productQuery = stripInsurerName(query, matchedInsurer);
         elements.input.value = productQuery;
         renderSelectedInsurer();
         handleSearch(productQuery);
       } else {
-        elements.input.value = target.dataset.query;
-        handleSearch(target.dataset.query);
+        elements.input.value = query;
+        handleSearch(query);
       }
       document.getElementById("results-section").scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
 
-    if (target.dataset.selectProduct) {
-      state.selectedProductId = target.dataset.selectProduct;
+    if (selectProductTarget instanceof HTMLElement) {
+      const { selectProduct } = selectProductTarget.dataset;
+      if (!selectProduct) return;
+      state.selectedProductId = selectProduct;
       renderDetail();
       document.getElementById("detail-section").scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
 
-    if (target.dataset.selectInsurer) {
-      state.selectedInsurer = insurers.find((item) => item.key === target.dataset.selectInsurer) || null;
+    if (selectInsurerTarget instanceof HTMLElement) {
+      const { selectInsurer } = selectInsurerTarget.dataset;
+      if (!selectInsurer) return;
+      state.selectedInsurer = insurers.find((item) => item.key === selectInsurer) || null;
       state.query = "";
       state.rawResults = [];
       state.results = [];
@@ -486,7 +496,7 @@ function bindEvents() {
       return;
     }
 
-    if (target.dataset.clearInsurer) {
+    if (clearInsurerTarget instanceof HTMLElement) {
       state.selectedInsurer = null;
       state.query = "";
       state.rawResults = [];
