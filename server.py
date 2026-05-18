@@ -5,6 +5,7 @@ import os
 import re
 import time
 import http.cookiejar
+import mimetypes
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -33,8 +34,8 @@ INSURER_REGISTRY = {
     "lotte": {
         "name": "롯데손해보험",
         "aliases": ["롯데", "롯데손해보험", "롯데손보"],
-        "type": "landing",
-        "official_url": "https://www.lotteins.co.kr",
+        "type": "live",
+        "official_url": "https://www.lotteins.co.kr/web/C/D/H/cdh190.jsp",
     },
     "hyundai": {
         "name": "현대해상",
@@ -45,8 +46,8 @@ INSURER_REGISTRY = {
     "samsung": {
         "name": "삼성화재",
         "aliases": ["삼성화재", "삼성"],
-        "type": "landing",
-        "official_url": "https://www.samsungfire.com",
+        "type": "live",
+        "official_url": "https://www.samsungfire.com/vh/page/VH.REIF0011.do",
     },
     "meritz": {
         "name": "메리츠화재",
@@ -646,19 +647,12 @@ class MeritzAdapter:
             original_name = item.get("ortxtFileNm") or item.get("atcFileNm") or f"{doc_type}.pdf"
             if not encrypted_path:
                 continue
-            params = urllib.parse.urlencode(
-                {
-                    "path": encrypted_path,
-                    "id": encrypted_path,
-                    "orgFileName": original_name,
-                    "pdfView": "Y",
-                }
-            )
+            params = urllib.parse.urlencode({"productCode": product_code, "name": original_name})
             documents.append(
                 {
                     "type": doc_type,
                     "title": original_name,
-                    "url": f"{cls.base}/hp/fileDownload.do?{params}",
+                    "url": f"/api/download/meritz?{params}",
                     "revisionDate": None,
                     "saleStartDate": None,
                     "saleEndDate": None,
@@ -666,6 +660,54 @@ class MeritzAdapter:
                 }
             )
         return documents
+
+    @classmethod
+    def download_document(cls, product_code: str, original_name: str) -> tuple[bytes, str, str]:
+        cookie_jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+        headers = {"User-Agent": USER_AGENT}
+
+        opener.open(urllib.request.Request(cls.source_url, headers=headers), timeout=30).read(128)
+        payload = cls.make_request("f.cg.he.ct.tm.o.bc.CtrCnfBc.retrievePdfFileLst", {"pdCd": product_code})
+        preflight_request = urllib.request.Request(
+            cls.json_url,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                **headers,
+                "Content-Type": "application/json; charset=UTF-8",
+                "Referer": cls.source_url,
+            },
+        )
+        preflight_response = json.loads(opener.open(preflight_request, timeout=30).read().decode("utf-8", errors="ignore"))
+        pdf_items = preflight_response.get("body", {}).get("pdfList", [])
+        encrypted_path = ""
+        for item in pdf_items:
+            candidate_name = item.get("ortxtFileNm") or item.get("atcFileNm")
+            if candidate_name == original_name:
+                encrypted_path = item.get("atcFilePthNm#[E]") or item.get("atcFilePthNm") or ""
+                break
+
+        if not encrypted_path:
+            raise ValueError("Meritz document token could not be refreshed")
+
+        params = urllib.parse.urlencode(
+            {
+                "path": encrypted_path,
+                "id": encrypted_path,
+                "orgFileName": original_name,
+                "pdfView": "Y",
+            }
+        )
+        download_url = f"{cls.base}/hp/fileDownload.do?{params}"
+        request = urllib.request.Request(download_url, headers={**headers, "Referer": cls.source_url})
+        with opener.open(request, timeout=30) as response:
+            body = response.read()
+            content_type = response.headers.get("Content-Type", "application/pdf")
+
+        if not body.startswith(b"%PDF"):
+            raise ValueError("Meritz document download did not return a PDF")
+
+        return body, original_name, content_type
 
     @classmethod
     def fetch_json(cls, url: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -719,6 +761,377 @@ class MeritzAdapter:
             },
             "body": body,
         }
+
+
+class LotteAdapter:
+    base = "https://www.lotteins.co.kr"
+    source_url = f"{base}/web/C/D/H/cdh190.jsp"
+    channel_url = f"{base}/CChannelSvl"
+    ops_tc = "dfi.c.d.g.cmd.Cdg079Cmd"
+    CACHE_SECONDS = 600
+    _catalog_cache: tuple[float, list[dict[str, Any]]] | None = None
+
+    CATEGORY_LABELS = {
+        ("01", "01"): "\uac1c\uc778\uc6a9",
+        ("01", "02"): "\uc5c5\ubb34\uc6a9",
+        ("01", "03"): "\uc601\uc5c5\uc6a9",
+        ("01", "04"): "\uc774\ub95c\ucc28",
+        ("01", "05"): "\uc6b4\uc804\uc790",
+        ("01", "06"): "\uc678\ud654\ud45c\uc2dc",
+        ("01", "07"): "\ub18d\uae30\uacc4",
+        ("01", "08"): "\uae30\ud0c0",
+        ("01", "09"): "\uc6b4\uc804\uba74\ud5c8\uad50\uc2b5\uc0dd",
+        ("01", "10"): "\ubaa8\ud130\ubc14\uc774\ud06c",
+        ("01", "11"): "\uacf5\ub3d9\uc778\uc218",
+        ("02", "01"): "\uc77c\ubc18\ubcf4\ud5d8",
+        ("03", "01"): "\uc0c1\ud574,\uc9c8\ubcd1",
+        ("03", "02"): "\uc800\ucd95",
+        ("03", "03"): "\uc6b4\uc804\uc790",
+        ("03", "04"): "\uc7ac\ubb3c\ubcf4\ud5d8",
+        ("03", "05"): "\uc5f0\uae08\ubcf4\ud5d8",
+        ("03", "06"): "\uc81c\ub3c4\uc131\ud2b9\uc57d",
+        ("04", "01"): "\uacf5\ud1b5",
+    }
+
+    DOC_TYPE_LABELS = {
+        "\uc0ac\uc5c5\ubc29\ubc95\uc11c": "\uc0ac\uc5c5\ubc29\ubc95\uc11c",
+        "\uc0c1\ud488\uc694\uc57d\uc11c": "\uc0c1\ud488\uc694\uc57d\uc11c",
+        "\ubcf4\ud5d8\uc57d\uad00": "\ubcf4\ud5d8\uc57d\uad00",
+    }
+
+    @classmethod
+    def search(cls, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        candidates: list[dict[str, Any]] = []
+        for item in cls.fetch_catalog():
+            score = score_text(query, item["productName"], item.get("insuranceType", ""), item.get("productCode", ""))
+            if score <= 0:
+                continue
+            ranked_item = dict(item)
+            ranked_item["score"] = score
+            candidates.append(ranked_item)
+
+        ranked = sorted(
+            unique_by(candidates, "status", "productCode", "productName"),
+            key=lambda item: (-item["score"], 0 if item.get("status") == "\ud310\ub9e4\uc911" else 1, item["productName"]),
+        )
+
+        results: list[dict[str, Any]] = []
+        for item in ranked:
+            period_results = cls.fetch_period_results(item)
+            if period_results:
+                best_period = sorted(
+                    period_results,
+                    key=lambda period: (
+                        0 if period.get("saleEndDate") is None else 1,
+                        -(int((period.get("saleStartDate") or "0").replace("-", ""))),
+                    ),
+                )[0]
+                best_period["score"] = item["score"]
+                results.append(best_period)
+            else:
+                results.append(item)
+            if len(results) >= limit * 3:
+                break
+
+        return sorted(
+            results,
+            key=lambda item: (-item.get("score", 0), 0 if item.get("status") == "\ud310\ub9e4\uc911" else 1, item.get("productName", "")),
+        )[:limit]
+
+    @classmethod
+    def fetch_catalog(cls) -> list[dict[str, Any]]:
+        cached = cls._catalog_cache
+        now = time.time()
+        if cached and now - cached[0] < cls.CACHE_SECONDS:
+            return [dict(item) for item in cached[1]]
+
+        page_html = fetch_text(cls.source_url, encoding="cp949")
+        categories = unique_by(cls.parse_categories(page_html), "lcode", "mcode")
+        catalog: list[dict[str, Any]] = []
+        for is_sale in [True, False]:
+            for category in categories:
+                catalog.extend(cls.fetch_products(category["lcode"], category["mcode"], is_sale=is_sale))
+
+        deduped = unique_by(catalog, "status", "productCode", "productName")
+        cls._catalog_cache = (now, deduped)
+        return [dict(item) for item in deduped]
+
+    @classmethod
+    def parse_categories(cls, html: str) -> list[dict[str, str]]:
+        categories = []
+        for lcode, mcode in re.findall(r"step2\('([^']+)','([^']+)',\s*\d+,\s*\d+\);", html):
+            categories.append({"lcode": lcode, "mcode": mcode})
+        return categories
+
+    @classmethod
+    def fetch_products(cls, lcode: str, mcode: str, *, is_sale: bool) -> list[dict[str, Any]]:
+        task = "gostep2issale" if is_sale else "gostep2isnotsale"
+        html = cls.post_form(
+            {
+                "ops_tc": cls.ops_tc,
+                "task": task,
+                "rtnUri": "/web/C/D/H/cdh190_result.jsp",
+                "lcode": lcode,
+                "mcode": mcode,
+                "scode": "",
+                "startdate": "",
+                "issale": "Y" if is_sale else "N",
+                "srcPrdNm": "",
+            }
+        )
+        products = []
+        for product_lcode, product_mcode, scode, product_name in re.findall(
+            r"step3\('([^']+)','([^']+)','([^']+)'\);classchkStep2\(\d+,\d+\);>\s*<span>(.*?)</span>",
+            html,
+        ):
+            name = clean_html(product_name)
+            if not name:
+                continue
+            products.append(
+                {
+                    "provider": "lotte",
+                    "insurerName": "\ub86f\ub370\uc190\ud574\ubcf4\ud5d8",
+                    "productName": name,
+                    "productCode": scode,
+                    "insuranceType": cls.CATEGORY_LABELS.get((product_lcode, product_mcode), ""),
+                    "status": "\ud310\ub9e4\uc911" if is_sale else "\ud310\ub9e4\uc911\uc9c0",
+                    "sourceUrl": cls.source_url,
+                    "documents": [],
+                    "saleStartDate": None,
+                    "saleEndDate": None,
+                    "updatedAt": None,
+                    "officialSource": "\ub86f\ub370\uc190\ud574\ubcf4\ud5d8 \uc0c1\ud488\ubaa9\ub85d/\ubcf4\ud5d8\uc57d\uad00",
+                    "lcode": product_lcode,
+                    "mcode": product_mcode,
+                    "scode": scode,
+                    "isSale": is_sale,
+                }
+            )
+        return products
+
+    @classmethod
+    def fetch_period_results(cls, product: dict[str, Any]) -> list[dict[str, Any]]:
+        task = "gostep3issale" if product.get("isSale") else "gostep3isnotsale"
+        html = cls.post_form(
+            {
+                "ops_tc": cls.ops_tc,
+                "task": task,
+                "rtnUri": "/web/C/D/H/cdh190_result.jsp",
+                "lcode": product["lcode"],
+                "mcode": product["mcode"],
+                "scode": product["scode"],
+                "startdate": "",
+                "issale": "Y" if product.get("isSale") else "N",
+                "srcPrdNm": "",
+            }
+        )
+        periods = re.findall(
+            r"step4\('([^']+)','([^']+)','([^']+)','([^']+)'\);classchkStep3\(\d+,\d+\);><span>(.*?)</a></span>",
+            html,
+        )
+        results = []
+        for lcode, mcode, scode, startdate, sale_period in periods:
+            details = cls.fetch_documents(lcode, mcode, scode, startdate, product.get("isSale", False))
+            if not details:
+                continue
+            period_result = dict(product)
+            period_result.update(details)
+            sale_start, sale_end = cls.parse_sale_period(sale_period)
+            period_result["saleStartDate"] = sale_start or details.get("saleStartDate")
+            period_result["saleEndDate"] = sale_end or details.get("saleEndDate")
+            period_result["updatedAt"] = sale_start or details.get("saleStartDate")
+            results.append(period_result)
+        return results
+
+    @classmethod
+    def fetch_documents(cls, lcode: str, mcode: str, scode: str, startdate: str, is_sale: bool) -> dict[str, Any] | None:
+        task = "gostep4issale" if is_sale else "gostep4isnotsale"
+        html = cls.post_form(
+            {
+                "ops_tc": cls.ops_tc,
+                "task": task,
+                "rtnUri": "/web/C/D/H/cdh190_result.jsp",
+                "lcode": lcode,
+                "mcode": mcode,
+                "scode": scode,
+                "startdate": startdate,
+                "issale": "Y" if is_sale else "N",
+                "srcPrdNm": "",
+            }
+        )
+        name_match = re.search(r"<dt>상품명</dt><dd><span>(.*?)</span></dd>", html)
+        sale_match = re.search(r"<dt class='pt20'>판매기간</dt><dd><span>(.*?)</span></dd>", html)
+        links = re.findall(r"<a href=([^ >]+)\s+title='새창열림_([^']+) PDF보기'[^>]*>", html)
+        if not name_match and not links:
+            return None
+
+        sale_start, sale_end = cls.parse_sale_period(sale_match.group(1) if sale_match else "")
+        documents = []
+        for href, raw_type in links:
+            doc_type = cls.DOC_TYPE_LABELS.get(clean_html(raw_type), clean_html(raw_type))
+            documents.append(
+                {
+                    "type": doc_type,
+                    "title": doc_type,
+                    "url": urllib.parse.urljoin(cls.base, href),
+                    "revisionDate": sale_start,
+                    "saleStartDate": sale_start,
+                    "saleEndDate": sale_end,
+                    "format": "PDF",
+                }
+            )
+
+        return {
+            "productName": clean_html(name_match.group(1)) if name_match else "",
+            "documents": documents,
+            "saleStartDate": sale_start,
+            "saleEndDate": sale_end,
+        }
+
+    @classmethod
+    def parse_sale_period(cls, value: str) -> tuple[str | None, str | None]:
+        text = clean_html(value).replace(" ", "")
+        match = re.match(r"(\d{4}\.\d{2}\.\d{2})~(.+)", text)
+        if not match:
+            return None, None
+        start_raw, end_raw = match.groups()
+        sale_start = clean_date(start_raw)
+        sale_end = None if "현재" in end_raw else clean_date(end_raw)
+        return sale_start, sale_end
+
+    @classmethod
+    def post_form(cls, payload: dict[str, str]) -> str:
+        body = urllib.parse.urlencode(payload, encoding="euc-kr").encode("ascii")
+        return fetch_text(
+            cls.channel_url,
+            method="POST",
+            data=body,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Referer": cls.source_url,
+                "Origin": cls.base,
+            },
+            encoding="cp949",
+        )
+
+
+class SamsungAdapter:
+    base = "https://www.samsungfire.com"
+    source_url = f"{base}/vh/page/VH.REIF0011.do"
+    api_url = f"{base}/vh/data/VH.HDIF0103.do"
+    CACHE_SECONDS = 600
+    _catalog_cache: tuple[float, list[dict[str, Any]]] | None = None
+
+    DOC_FIELDS = [
+        ("prdfilename2", "\uc0ac\uc5c5\ubc29\ubc95\uc11c"),
+        ("prdfilename3", "\uc0c1\ud488\uc694\uc57d\uc11c"),
+        ("prdfilename1", "\ubcf4\ud5d8\uc57d\uad00"),
+        ("prdfilename4", "\uc0c1\ud488\uc124\uba85\uc11c"),
+    ]
+
+    @classmethod
+    def search(cls, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        results = []
+        for item in cls.fetch_catalog():
+            score = score_text(
+                query,
+                item["productName"],
+                item.get("insuranceType", ""),
+                item.get("insuranceCategory", ""),
+                item.get("channel", ""),
+                item.get("productCode", ""),
+            )
+            if score <= 0:
+                continue
+            ranked = dict(item)
+            ranked["score"] = score
+            results.append(ranked)
+
+        return sorted(
+            unique_by(results, "status", "productCode", "productName", "saleStartDate"),
+            key=lambda item: (-item.get("score", 0), 0 if item.get("status") == "\ud310\ub9e4\uc911" else 1, item.get("productName", "")),
+        )[:limit]
+
+    @classmethod
+    def fetch_catalog(cls) -> list[dict[str, Any]]:
+        cached = cls._catalog_cache
+        now = time.time()
+        if cached and now - cached[0] < cls.CACHE_SECONDS:
+            return [dict(item) for item in cached[1]]
+
+        response = cls.fetch_json("VH.HDIF0103", {})
+        catalog: list[dict[str, Any]] = []
+        for item in response.get("responseMessage", {}).get("body", {}).get("data", {}).get("list", []):
+            product_name = (item.get("prdName") or "").strip()
+            if not product_name:
+                continue
+
+            sale_end_raw = (item.get("saleEnDt") or "").strip()
+            display_gb = (item.get("displayGb") or "").strip()
+            is_active = display_gb == "1" or (display_gb != "2" and sale_end_raw == "99991231")
+            sale_start = clean_date(item.get("saleStDt"))
+            sale_end = None if sale_end_raw == "99991231" else clean_date(sale_end_raw)
+            documents = []
+            for field_name, doc_type in cls.DOC_FIELDS:
+                path = (item.get(field_name) or "").strip()
+                if not path:
+                    continue
+                title = path.split("/")[-1] or doc_type
+                ext = title.rsplit(".", 1)[-1].upper() if "." in title else "PDF"
+                documents.append(
+                    {
+                        "type": doc_type,
+                        "title": title,
+                        "url": urllib.parse.urljoin(cls.base, path),
+                        "revisionDate": sale_start,
+                        "saleStartDate": sale_start,
+                        "saleEndDate": sale_end,
+                        "format": ext,
+                    }
+                )
+
+            catalog.append(
+                {
+                    "provider": "samsung",
+                    "insurerName": "\uc0bc\uc131\ud654\uc7ac",
+                    "productName": product_name,
+                    "productCode": str(item.get("prdCode") or ""),
+                    "insuranceType": (item.get("prdGb") or "").strip(),
+                    "insuranceCategory": (item.get("prdGun") or "").strip(),
+                    "channel": (item.get("saleChannel") or "").strip(),
+                    "status": "\ud310\ub9e4\uc911" if is_active else "\ud310\ub9e4\uc911\uc9c0",
+                    "sourceUrl": cls.source_url,
+                    "documents": documents,
+                    "saleStartDate": sale_start,
+                    "saleEndDate": sale_end,
+                    "updatedAt": sale_start,
+                    "officialSource": "\uc0bc\uc131\ud654\uc7ac \ubcf4\ud5d8\uc0c1\ud488\uacf5\uc2dc",
+                }
+            )
+
+        deduped = unique_by(catalog, "status", "productCode", "productName", "saleStartDate")
+        cls._catalog_cache = (now, deduped)
+        return [dict(item) for item in deduped]
+
+    @classmethod
+    def fetch_json(cls, tran_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        payload = urllib.parse.urlencode(
+            {
+                "header": json.dumps({"tranId": tran_id}, ensure_ascii=False),
+                "body": json.dumps(body, ensure_ascii=False),
+            }
+        ).encode("utf-8")
+        raw = fetch_text(
+            cls.api_url,
+            method="POST",
+            data=payload,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                "Referer": cls.source_url,
+            },
+            encoding="utf-8",
+        )
+        return json.loads(raw)
 
 
 class HanwhaFireAdapter:
@@ -1125,7 +1538,7 @@ def landing_result(provider_key: str, query: str) -> list[dict[str, Any]]:
 
 def search_all(raw_query: str) -> dict[str, Any]:
     context = parse_query(raw_query)
-    provider_keys = [context.insurer_key] if context.insurer_key else ["kb", "db", "hyundai", "meritz", "heungkuk", "hanwhafire"]
+    provider_keys = [context.insurer_key] if context.insurer_key else ["kb", "db", "hyundai", "samsung", "lotte", "meritz", "heungkuk", "hanwhafire"]
     results = []
     errors = []
     for provider_key in provider_keys:
@@ -1136,6 +1549,10 @@ def search_all(raw_query: str) -> dict[str, Any]:
                 results.extend(DbAdapter.search(context.product_query))
             elif provider_key == "hyundai":
                 results.extend(HyundaiAdapter.search(context.product_query))
+            elif provider_key == "samsung":
+                results.extend(SamsungAdapter.search(context.product_query))
+            elif provider_key == "lotte":
+                results.extend(LotteAdapter.search(context.product_query))
             elif provider_key == "meritz":
                 results.extend(MeritzAdapter.search(context.product_query))
             elif provider_key == "heungkuk":
@@ -1199,6 +1616,26 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             self.send_response(200)
             self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Disposition", f"inline; filename*=UTF-8''{urllib.parse.quote(filename)}")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if parsed.path in {"/api/download/meritz", "/api/meritz_download", "/api/meritz-download"}:
+            params = urllib.parse.parse_qs(parsed.query)
+            product_code = params.get("productCode", [""])[0].strip()
+            original_name = params.get("name", ["meritz.pdf"])[0].strip() or "meritz.pdf"
+            if not product_code:
+                self.send_json({"error": "productCode is required"}, status=400)
+                return
+            try:
+                body, filename, content_type = MeritzAdapter.download_document(product_code, original_name)
+            except Exception as exc:
+                self.send_json({"error": str(exc)}, status=502)
+                return
+            guessed_type = mimetypes.guess_type(filename)[0] or content_type or "application/pdf"
+            self.send_response(200)
+            self.send_header("Content-Type", guessed_type)
             self.send_header("Content-Disposition", f"inline; filename*=UTF-8''{urllib.parse.quote(filename)}")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
