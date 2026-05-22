@@ -6,6 +6,7 @@ const insurers = [
   { key: "hyundai", name: "\uD604\uB300\uD574\uC0C1", aliases: ["\uD604\uB300\uD574\uC0C1", "\uD604\uB300", "\uD558\uC774\uCE74"], officialUrl: "https://children.hi.co.kr/bin/CI/ON/CION3200G.jsp", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0" },
   { key: "samsung", name: "\uC0BC\uC131\uD654\uC7AC", aliases: ["\uC0BC\uC131\uD654\uC7AC", "\uC0BC\uC131"], officialUrl: "https://www.samsungfire.com/vh/page/VH.REIF0011.do", coverage: "\uC2E4\uC81C \uACF5\uC2DD API + PDF \uC5F0\uACB0" },
   { key: "lotte", name: "\uB86F\uB370\uC190\uD574\uBCF4\uD5D8", aliases: ["\uB86F\uB370\uC190\uD574\uBCF4\uD5D8", "\uB86F\uB370", "\uB86F\uB370\uC190\uBCF4"], officialUrl: "https://www.lotteins.co.kr/web/C/D/H/cdh190.jsp", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0" },
+  { key: "nhfire", name: "NH\uB18D\uD611\uC190\uD574\uBCF4\uD5D8", aliases: ["nh\uB18D\uD611\uC190\uD574\uBCF4\uD5D8", "nh\uB18D\uD611", "\uB18D\uD611\uC190\uD574\uBCF4\uD5D8", "\uB18D\uD611\uC190\uBCF4", "nh\uC190\uD574\uBCF4\uD5D8", "nh\uC190\uBCF4"], officialUrl: "https://www.nhfire.co.kr/announce/productAnnounce/retrieveInsuranceProductsAnnounce.nhfire", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0" },
   { key: "meritz", name: "\uBA54\uB9AC\uCE20\uD654\uC7AC", aliases: ["\uBA54\uB9AC\uCE20\uD654\uC7AC", "\uBA54\uB9AC\uCE20", "\uBA54\uB9AC\uCE20\uC190\uBCF4"], officialUrl: "https://store.meritzfire.com/disclosure/product.do", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0" },
   { key: "hanwhafire", name: "\uD55C\uD654\uC190\uD574\uBCF4\uD5D8", aliases: ["\uD55C\uD654\uC190\uD574\uBCF4\uD5D8", "\uD55C\uD654\uC190\uBCF4", "\uD55C\uD654\uD654\uC7AC"], officialUrl: "https://m.hwgeneralins.com/product/catalog/product-info.do", coverage: "\uC2E4\uC81C \uACF5\uC2DD API + PDF \uC5F0\uACB0" },
   { key: "heungkuk", name: "\uD765\uAD6D\uD654\uC7AC", aliases: ["\uD765\uAD6D\uD654\uC7AC", "\uD765\uAD6D"], officialUrl: "https://m.heungkukfire.co.kr/product/insr/CPDIS0001_M00/CPDIS0001_M00.do", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0" },
@@ -13,20 +14,20 @@ const insurers = [
   { key: "kyobo", name: "\uAD50\uBCF4\uC0DD\uBA85", aliases: ["\uAD50\uBCF4\uC0DD\uBA85", "\uAD50\uBCF4"], officialUrl: "https://www.kyobo.com", coverage: "\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC5F0\uACB0" },
 ];
 
-const mainInsurerKeys = ["meritz", "db", "kb", "samsung", "heungkuk", "hanwhafire", "hyundai", "lotte"];
+const mainInsurerKeys = ["meritz", "db", "kb", "samsung", "nhfire", "heungkuk", "hanwhafire", "hyundai", "lotte"];
 
 const genericTerms = ["\uBCF4\uD5D8", "\uC57D\uAD00", "\uC0C1\uD488", "\uC694\uC57D\uC11C", "\uC0AC\uC5C5\uBC29\uBC95\uC11C", "\uB2E4\uC6B4\uB85C\uB4DC", "\uAC80\uC0C9", "\uCC3E\uAE30", "\uACF5\uC2DC\uC2E4"];
 
 const adminCards = [
   {
     title: "\uBCF4\uD5D8\uC0AC\uBCC4 \uBB38\uC11C \uC218\uC9D1 \uD604\uD669",
-    body: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0\uC740 KB\uC190\uD574\uBCF4\uD5D8, DB\uC190\uD574\uBCF4\uD5D8, \uD604\uB300\uD574\uC0C1, \uC0BC\uC131\uD654\uC7AC, \uB86F\uB370\uC190\uD574\uBCF4\uD5D8, \uD765\uAD6D\uD654\uC7AC, \uD55C\uD654\uC190\uD574\uBCF4\uD5D8 \uC5B4\uB311\uD130\uB97C \uC6B0\uC120 \uAD6C\uC131\uD588\uC2B5\uB2C8\uB2E4.",
-    items: ["KB \uC0C1\uC138 \uC57D\uAD00 \uD06C\uB864\uB9C1", "DB \uAC80\uC0C9 API \uC5F0\uACB0", "\uD604\uB300\uD574\uC0C1 \uC804\uCCB4 \uC0C1\uD488\uBAA9\uB85D + PDF \uC5F0\uACB0", "\uC0BC\uC131\uD654\uC7AC \uC0C1\uD488\uACF5\uC2DC API + PDF \uC5F0\uACB0", "\uB86F\uB370\uC190\uD574\uBCF4\uD5D8 \uC0C1\uD488\uBAA9\uB85D + \uD310\uB9E4\uAE30\uAC04 + PDF \uC5F0\uACB0", "\uD765\uAD6D\uD654\uC7AC CSRF \uC138\uC158 + PDF \uD504\uB85D\uC2DC \uC5F0\uACB0", "\uD55C\uD654\uC190\uD574\uBCF4\uD5D8 \uBAA8\uBC14\uC77C \uC0C1\uD488 API + PDF \uC5F0\uACB0"],
+    body: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0\uC740 KB\uC190\uD574\uBCF4\uD5D8, DB\uC190\uD574\uBCF4\uD5D8, \uD604\uB300\uD574\uC0C1, \uC0BC\uC131\uD654\uC7AC, \uB86F\uB370\uC190\uD574\uBCF4\uD5D8, NH\uB18D\uD611\uC190\uD574\uBCF4\uD5D8, \uD765\uAD6D\uD654\uC7AC, \uD55C\uD654\uC190\uD574\uBCF4\uD5D8 \uC5B4\uB311\uD130\uB97C \uC6B0\uC120 \uAD6C\uC131\uD588\uC2B5\uB2C8\uB2E4.",
+    items: ["KB \uC0C1\uC138 \uC57D\uAD00 \uD06C\uB864\uB9C1", "DB \uAC80\uC0C9 API \uC5F0\uACB0", "\uD604\uB300\uD574\uC0C1 \uC804\uCCB4 \uC0C1\uD488\uBAA9\uB85D + PDF \uC5F0\uACB0", "\uC0BC\uC131\uD654\uC7AC \uC0C1\uD488\uACF5\uC2DC API + PDF \uC5F0\uACB0", "\uB86F\uB370\uC190\uD574\uBCF4\uD5D8 \uC0C1\uD488\uBAA9\uB85D + \uD310\uB9E4\uAE30\uAC04 + PDF \uC5F0\uACB0", "NH\uB18D\uD611\uC190\uD574\uBCF4\uD5D8 \uC0C1\uD488\uACF5\uC2DC + \uC0C1\uC138 PDF \uD504\uB85D\uC2DC \uC5F0\uACB0", "\uD765\uAD6D\uD654\uC7AC CSRF \uC138\uC158 + PDF \uD504\uB85D\uC2DC \uC5F0\uACB0", "\uD55C\uD654\uC190\uD574\uBCF4\uD5D8 \uBAA8\uBC14\uC77C \uC0C1\uD488 API + PDF \uC5F0\uACB0"],
   },
   {
     title: "\uB9C1\uD06C \uC804\uB7B5",
     body: "\uCD08\uAE30 MVP\uB294 \uACF5\uC2DD \uBB38\uC11C URL \uC5F0\uACB0\uC744 \uC6B0\uC120\uD558\uACE0 \uACF5\uC2DD \uCD9C\uCC98 \uD45C\uC2DC\uB97C \uC720\uC9C0\uD569\uB2C8\uB2E4.",
-    items: ["KB: CG802030003.ec", "DB: cYakgwanDown.do", "\uC0BC\uC131: VH.HDIF0103 + publication/pdf", "\uB86F\uB370: CChannelSvl + cdh190_result.jsp", "\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uBC14\uB85C\uAC00\uAE30"],
+    items: ["KB: CG802030003.ec", "DB: cYakgwanDown.do", "\uC0BC\uC131: VH.HDIF0103 + publication/pdf", "\uB86F\uB370: CChannelSvl + cdh190_result.jsp", "NH\uB18D\uD611: retrieveProduct + downloadFile.ajax", "\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uBC14\uB85C\uAC00\uAE30"],
   },
   {
     title: "\uAC80\uC0C9 \uD750\uB984",
@@ -47,7 +48,7 @@ const LABELS = {
   resultTitle: "\uAC00\uC7A5 \uC77C\uCE58\uD558\uB294 \uACF5\uC2DD \uBB38\uC11C\uB97C \uCC3E\uC558\uC2B5\uB2C8\uB2E4",
   noResultTitle: "\uC6D0\uD558\uC2DC\uB294 \uC0C1\uD488\uC774 \uC544\uB2C8\uC2E0\uAC00\uC694?",
   beforeDetail: "\uC0C1\uD488\uC744 \uC120\uD0DD\uD558\uBA74 \uC0C1\uC138 \uBB38\uC11C\uC640 \uD6C4\uC18D \uC561\uC158\uC774 \uC5EC\uAE30\uC5D0 \uD45C\uC2DC\uB429\uB2C8\uB2E4.",
-  beforeDetailHint: "\uD604\uC7AC\uB294 KB\uC190\uD574\uBCF4\uD5D8, DB\uC190\uD574\uBCF4\uD5D8, \uD604\uB300\uD574\uC0C1, \uBA54\uB9AC\uCE20\uD654\uC7AC, \uD765\uAD6D\uD654\uC7AC, \uD55C\uD654\uC190\uD574\uBCF4\uD5D8\uC744 \uC2E4\uC81C \uC5F0\uACB0\uD558\uACE0, \uB098\uBA38\uC9C0 \uBCF4\uD5D8\uC0AC\uB294 \uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC5F0\uACB0 \uC911\uC2EC\uC73C\uB85C \uAD6C\uC131\uB429\uB2C8\uB2E4.",
+  beforeDetailHint: "\uD604\uC7AC\uB294 KB\uC190\uD574\uBCF4\uD5D8, DB\uC190\uD574\uBCF4\uD5D8, \uD604\uB300\uD574\uC0C1, \uC0BC\uC131\uD654\uC7AC, \uB86F\uB370\uC190\uD574\uBCF4\uD5D8, NH\uB18D\uD611\uC190\uD574\uBCF4\uD5D8, \uBA54\uB9AC\uCE20\uD654\uC7AC, \uD765\uAD6D\uD654\uC7AC, \uD55C\uD654\uC190\uD574\uBCF4\uD5D8\uC744 \uC2E4\uC81C \uC5F0\uACB0\uD558\uACE0, \uB098\uBA38\uC9C0 \uBCF4\uD5D8\uC0AC\uB294 \uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC5F0\uACB0 \uC911\uC2EC\uC73C\uB85C \uAD6C\uC131\uB429\uB2C8\uB2E4.",
   currentSale: "\uD604\uC7AC \uD310\uB9E4",
 };
 
@@ -227,7 +228,8 @@ function toViewModel(result, index) {
     id: result.id ?? `${result.provider || "provider"}-${result.productCode || index}`,
     documents: (result.documents || []).map((doc) => ({
       type: doc.type,
-      title: doc.title || doc.type,
+      title: doc.displayTitle || doc.type || doc.title,
+      fileTitle: doc.title || doc.displayTitle || doc.type,
       revisionDate: doc.revisionDate || doc.saleStartDate || "",
       url: doc.url,
       format: doc.format || "PDF",
@@ -369,8 +371,9 @@ function renderDetail() {
           .map(
             (doc) => `
               <article class="doc-item">
-                <div class="doc-header"><div><p class="eyebrow">${doc.type}</p><h4>${doc.title}</h4></div><span class="pill">${doc.revisionDate || "-"}</span></div>
-                <div class="action-row"><a class="download-link" href="${doc.url}" target="_blank" rel="noreferrer">PDF \uB2E4\uC6B4\uB85C\uB4DC</a><a class="doc-link" href="${product.sourceUrl}" target="_blank" rel="noreferrer">\uBCF4\uD5D8\uC0AC \uC6D0\uBB38 \uBCF4\uAE30</a></div>
+                <div class="doc-header"><div><p class="eyebrow">${doc.type}</p><h4>${doc.title}</h4></div><span class="pill">${doc.format}</span></div>
+                <p class="meta-line">\uAC1C\uC815\uC77C ${doc.revisionDate || "-"} · \uACF5\uC2DD\uCD9C\uCC98 ${product.officialSource}</p>
+                <div class="action-row"><a class="download-link" href="${doc.url}" target="_blank" rel="noreferrer">\uB2E4\uC6B4\uB85C\uB4DC</a><a class="doc-link" href="${product.sourceUrl}" target="_blank" rel="noreferrer">\uC6D0\uBB38 \uBCF4\uAE30</a></div>
               </article>
             `
           )

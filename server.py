@@ -8,6 +8,7 @@ import http.cookiejar
 import mimetypes
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -66,6 +67,12 @@ INSURER_REGISTRY = {
         "aliases": ["흥국화재", "흥국"],
         "type": "live",
         "official_url": "https://m.heungkukfire.co.kr/product/insr/CPDIS0001_M00/CPDIS0001_M00.do",
+    },
+    "nhfire": {
+        "name": "NH농협손해보험",
+        "aliases": ["nh농협손해보험", "nh농협", "농협손해보험", "농협손보", "nh손해보험", "nh손보"],
+        "type": "live",
+        "official_url": "https://www.nhfire.co.kr/announce/productAnnounce/retrieveInsuranceProductsAnnounce.nhfire",
     },
     "hanwha": {
         "name": "한화생명",
@@ -582,7 +589,7 @@ class MeritzAdapter:
 
     @classmethod
     def search(cls, query: str, limit: int = 10) -> list[dict[str, Any]]:
-        products = []
+        candidates = []
         for item in cls.fetch_products():
             score = score_text(query, item["productName"], item["productCode"], item.get("insuranceType", ""))
             if score <= 0:
@@ -770,6 +777,9 @@ class LotteAdapter:
     ops_tc = "dfi.c.d.g.cmd.Cdg079Cmd"
     CACHE_SECONDS = 600
     _catalog_cache: tuple[float, list[dict[str, Any]]] | None = None
+    _detail_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+    _detail_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+    _detail_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
     CATEGORY_LABELS = {
         ("01", "01"): "\uac1c\uc778\uc6a9",
@@ -833,9 +843,51 @@ class LotteAdapter:
             if len(results) >= limit * 3:
                 break
 
-        return sorted(
+        ranked_candidates = sorted(
             results,
             key=lambda item: (-item.get("score", 0), 0 if item.get("status") == "\ud310\ub9e4\uc911" else 1, item.get("productName", "")),
+        )
+        return ranked_candidates[:limit]
+        return ranked_candidates[:limit]
+
+        enriched_results = []
+        for item in ranked_candidates[: max(limit * 4, 8)]:
+            detail = cls.get_product_detail(item["productCode"])
+            enriched = dict(item)
+            enriched.update(detail)
+            enriched["score"] = score_text(
+                query,
+                enriched["productName"],
+                enriched.get("insuranceType", ""),
+                enriched.get("keywords", ""),
+                " ".join(doc.get("type", "") for doc in enriched.get("documents", [])),
+                enriched.get("productCode", ""),
+            )
+            enriched_results.append(enriched)
+
+        ranked_candidates = sorted(
+            unique_by(enriched_results, "productCode", "productName"),
+            key=lambda item: (-item["score"], item["productName"]),
+        )
+
+        enriched_results = []
+        for item in ranked_candidates[: max(limit * 4, 8)]:
+            detail = cls.get_product_detail(item["productCode"])
+            enriched = dict(item)
+            enriched.update(detail)
+            enriched["score"] = score_text(
+                query,
+                enriched["productName"],
+                enriched.get("insuranceType", ""),
+                enriched.get("keywords", ""),
+                " ".join(doc.get("type", "") for doc in enriched.get("documents", [])),
+                enriched.get("productCode", ""),
+            )
+            enriched_results.append(enriched)
+
+        return sorted(
+            unique_by(enriched_results, "productCode", "productName"),
+            key=lambda item: (-item["score"], item["productName"]),
         )[:limit]
 
     @classmethod
@@ -847,7 +899,7 @@ class LotteAdapter:
 
         page_html = fetch_text(cls.source_url, encoding="cp949")
         categories = unique_by(cls.parse_categories(page_html), "lcode", "mcode")
-        catalog: list[dict[str, Any]] = []
+        catalog = unique_by(products, "productCode", "productName")
         for is_sale in [True, False]:
             for category in categories:
                 catalog.extend(cls.fetch_products(category["lcode"], category["mcode"], is_sale=is_sale))
@@ -879,7 +931,7 @@ class LotteAdapter:
                 "srcPrdNm": "",
             }
         )
-        products = []
+        candidates = []
         for product_lcode, product_mcode, scode, product_name in re.findall(
             r"step3\('([^']+)','([^']+)','([^']+)'\);classchkStep2\(\d+,\d+\);>\s*<span>(.*?)</span>",
             html,
@@ -1132,6 +1184,606 @@ class SamsungAdapter:
             encoding="utf-8",
         )
         return json.loads(raw)
+
+
+class NhFireAdapter:
+    base = "https://www.nhfire.co.kr"
+    source_url = f"{base}/announce/productAnnounce/retrieveInsuranceProductsAnnounce.nhfire"
+    disclosure_ajax_url = f"{base}/front/announce/retrievePdtInfo.ajax"
+    CACHE_SECONDS = 600
+    _catalog_cache: tuple[float, list[dict[str, Any]]] | None = None
+
+    @classmethod
+    def search(cls, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        return NhFireLiveAdapter.search(query, limit)
+
+    @classmethod
+    def fetch_catalog(cls) -> list[dict[str, Any]]:
+        cached = cls._catalog_cache
+        now = time.time()
+        if cached and now - cached[0] < cls.CACHE_SECONDS:
+            return [dict(item) for item in cached[1]]
+
+        html = fetch_text(cls.source_url, encoding="utf-8")
+        category_positions = [
+            {
+                "start": match.start(),
+                "category": clean_html(match.group(2) or match.group(1) or ""),
+            }
+            for match in re.finditer(
+                r'<a href="javascript:void\(0\);" onclick="fnRetrieveProductInfo\(\'[A-Z0-9]+\'\)(?:;return false;)?"\s+title="([^"]*)">([^<]+)</a>',
+                html,
+                re.S,
+            )
+        ]
+
+        products: list[dict[str, Any]] = []
+        for match in re.finditer(
+            r'<a href="/product/retrieveProduct\.nhfire\?pdtCd=([A-Z0-9]+)"\s+title="([^"]+)"[^>]*>(.*?)</a>',
+            html,
+            re.S,
+        ):
+            product_code = match.group(1)
+            product_name = clean_html(match.group(3) or match.group(2))
+            if not product_name:
+                continue
+            category = cls.category_for_position(category_positions, match.start())
+            products.append(
+                {
+                    "provider": "nhfire",
+                    "insurerName": "NH농협손해보험",
+                    "productName": product_name,
+                    "productCode": product_code,
+                    "insuranceType": category,
+                    "status": "판매중",
+                    "sourceUrl": cls.detail_page_url(product_code),
+                    "documents": [],
+                    "saleStartDate": None,
+                    "saleEndDate": None,
+                    "updatedAt": None,
+                    "officialSource": "NH농협손해보험 상품공시",
+                    "keywords": "",
+                }
+            )
+
+        catalog = unique_by(products, "productCode", "productName")
+        for item in []:
+            detail = cls.fetch_product_detail(item["productCode"])
+            merged = dict(item)
+            merged.update(detail)
+            merged["sourceUrl"] = cls.detail_page_url(item["productCode"])
+            merged["officialSource"] = "NH농협손해보험 상품공시"
+            catalog.append(merged)
+
+        cls._catalog_cache = (now, catalog)
+        return [dict(item) for item in catalog]
+
+    @classmethod
+    def get_product_detail(cls, product_code: str) -> dict[str, Any]:
+        cached = cls._detail_cache.get(product_code)
+        now = time.time()
+        if cached and now - cached[0] < cls.CACHE_SECONDS:
+            return dict(cached[1])
+        detail = cls.fetch_product_detail(product_code)
+        cls._detail_cache[product_code] = (now, detail)
+        return dict(detail)
+
+    @staticmethod
+    def category_for_position(categories: list[dict[str, Any]], position: int) -> str:
+        current = ""
+        for item in categories:
+            if item["start"] > position:
+                break
+            current = item["category"]
+        return current
+
+    @classmethod
+    def fetch_product_detail(cls, product_code: str) -> dict[str, Any]:
+        html = fetch_text(cls.detail_page_url(product_code), encoding="utf-8")
+        disclosure = cls.fetch_disclosure(product_code)
+        documents = disclosure["documents"] or cls.parse_documents(product_code, html)
+        keywords_match = re.search(r'<ul class="bar_area">\s*<li>\s*(.*?)\s*</li>', html, re.S)
+        keywords = clean_html(keywords_match.group(1)) if keywords_match else ""
+        revision_date = disclosure["updatedAt"] or (documents[0]["revisionDate"] if documents else None)
+        return {
+            "documents": documents,
+            "saleStartDate": disclosure["saleStartDate"],
+            "saleEndDate": disclosure["saleEndDate"],
+            "updatedAt": revision_date,
+            "keywords": keywords,
+        }
+
+    @classmethod
+    def fetch_disclosure(cls, product_code: str) -> dict[str, Any]:
+        jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+        opener.open(urllib.request.Request(cls.source_url, headers={"User-Agent": USER_AGENT}), timeout=30).read()
+        query = urllib.parse.urlencode({"type": "ajax", "fileType": "05", "pdtCd": product_code})
+        request = urllib.request.Request(
+            f"{cls.disclosure_ajax_url}?{query}",
+            headers={
+                "User-Agent": USER_AGENT,
+                "Referer": cls.source_url,
+                "X-Requested-With": "XMLHttpRequest",
+            },
+        )
+        xml_text = opener.open(request, timeout=30).read().decode("utf-8", errors="ignore")
+        rows = cls.parse_disclosure_rows(xml_text)
+        current = cls.pick_current_disclosure(rows)
+        if not current:
+            return {"documents": [], "saleStartDate": None, "saleEndDate": None, "updatedAt": None}
+        documents = cls.documents_from_disclosure(product_code, current)
+        return {
+            "documents": documents,
+            "saleStartDate": clean_date(current.get("pdtSelStDt")),
+            "saleEndDate": clean_date(current.get("pdtSelEdDt")),
+            "updatedAt": clean_date(current.get("pdtSelStDt")),
+        }
+
+    @staticmethod
+    def parse_disclosure_rows(xml_text: str) -> list[dict[str, str]]:
+        root = ET.fromstring(xml_text)
+        multi = root.find(".//LMultiData")
+        if multi is None:
+            return []
+
+        grouped: dict[str, list[str]] = {}
+        for child in multi:
+            grouped.setdefault(child.tag, []).append((child.text or "").strip())
+
+        row_count = max((len(values) for values in grouped.values()), default=0)
+        rows: list[dict[str, str]] = []
+        for index in range(row_count):
+            row = {key: values[index] if index < len(values) else "" for key, values in grouped.items()}
+            rows.append(row)
+        return rows
+
+    @staticmethod
+    def pick_current_disclosure(rows: list[dict[str, str]]) -> dict[str, str] | None:
+        if not rows:
+            return None
+
+        def sort_key(row: dict[str, str]) -> tuple[int, str]:
+            end_date = row.get("pdtSelEdDt") or ""
+            is_current = 0 if end_date in {"99991231", "29991231", ""} else 1
+            return (is_current, row.get("pdtSelStDt") or "")
+
+        return sorted(rows, key=sort_key, reverse=False)[0]
+
+    @classmethod
+    def documents_from_disclosure(cls, product_code: str, row: dict[str, str]) -> list[dict[str, Any]]:
+        documents = []
+        mappings = [
+            ("plcndAfileSeqn", "plcndAfileNm", "보험약관"),
+            ("bzMtdAfileSeqn", "bzMtdAfileNm", "사업방법서"),
+            ("smmrAfileSeqn", "smmrAfileNm", "상품요약서"),
+        ]
+        file_id = row.get("fileId", "")
+        revision_date = clean_date(row.get("pdtSelStDt"))
+        for seq_key, name_key, doc_type in mappings:
+            seq = (row.get(seq_key) or "").strip()
+            file_name = (row.get(name_key) or "").strip()
+            if not file_id or not seq or not file_name:
+                continue
+            documents.append(
+                {
+                    "type": doc_type,
+                    "title": doc_type,
+                    "displayTitle": doc_type,
+                    "url": (
+                        f"/api/download/nhfire?pdtCd={urllib.parse.quote(product_code)}"
+                        f"&fileId={urllib.parse.quote(file_id)}&seq={urllib.parse.quote(seq)}&name={urllib.parse.quote(file_name)}"
+                    ),
+                    "revisionDate": revision_date or cls.extract_revision(file_name),
+                    "saleStartDate": clean_date(row.get("pdtSelStDt")),
+                    "saleEndDate": clean_date(row.get("pdtSelEdDt")),
+                    "format": "PDF",
+                }
+            )
+        return documents
+
+    @classmethod
+    def parse_documents(cls, product_code: str, html: str) -> list[dict[str, Any]]:
+        documents = []
+        seen: set[tuple[str, str]] = set()
+        for file_id, seq, filename in re.findall(
+            r"fnPdtFileDownload\('([^']+)',\s*'([^']+)',\s*'([^']*)'\)",
+            html,
+        ):
+            file_name = filename.strip()
+            if not file_name:
+                continue
+            signature = (file_id, seq)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            documents.append(
+                {
+                    "type": cls.document_type(file_name),
+                    "title": cls.document_type(file_name),
+                    "displayTitle": cls.document_type(file_name),
+                    "url": f"/api/download/nhfire?pdtCd={urllib.parse.quote(product_code)}&seq={urllib.parse.quote(seq)}&name={urllib.parse.quote(file_name)}",
+                    "revisionDate": cls.extract_revision(file_name),
+                    "saleStartDate": None,
+                    "saleEndDate": None,
+                    "format": "PDF",
+                }
+            )
+        return documents
+
+    @staticmethod
+    def document_type(filename: str) -> str:
+        lowered = filename.lower()
+        if "안내장" in filename:
+            return "상품설명서"
+        if "요약" in filename:
+            return "상품요약서"
+        if "사업방법" in filename:
+            return "사업방법서"
+        if "설명" in filename:
+            return "상품설명서"
+        if "약관" in filename or lowered.endswith(".pdf"):
+            return "보험약관"
+        return "공식문서"
+
+    @classmethod
+    def download_document(cls, product_code: str, seq: str, preferred_name: str = "", file_id: str = "") -> tuple[bytes, str, str]:
+        jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+        referer_url = cls.source_url
+        html = opener.open(urllib.request.Request(referer_url, headers={"User-Agent": USER_AGENT}), timeout=30).read().decode("utf-8", errors="ignore")
+        action_match = re.search(r'"(/imageView/downloadFile\.ajax;jsessionid=[^"]+)"', html)
+        if not action_match:
+            raise ValueError("NH농협손해보험 다운로드 경로를 찾지 못했습니다.")
+
+        resolved_file_id = file_id.strip()
+        resolved_name = preferred_name.strip()
+        if not resolved_file_id:
+            disclosure = cls.fetch_disclosure(product_code)
+            for document in disclosure["documents"]:
+                parsed = urllib.parse.urlparse(document["url"])
+                params = urllib.parse.parse_qs(parsed.query)
+                if params.get("seq", [""])[0] == seq:
+                    resolved_file_id = params.get("fileId", [""])[0]
+                    resolved_name = urllib.parse.unquote(params.get("name", [""])[0]) or resolved_name
+                    break
+
+        if not resolved_file_id:
+            raise ValueError("NH농협손해보험 문서 정보를 찾지 못했습니다.")
+
+        body = urllib.parse.urlencode({"fileId": resolved_file_id, "afileSeqn": seq}).encode("utf-8")
+        request = urllib.request.Request(
+            urllib.parse.urljoin(cls.base, action_match.group(1)),
+            data=body,
+            headers={
+                "User-Agent": USER_AGENT,
+                "Referer": referer_url,
+                "Origin": cls.base,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            method="POST",
+        )
+        with opener.open(request, timeout=30) as response:
+            payload = response.read()
+            content_type = response.getheader("Content-Type") or "application/octet-stream"
+
+        if not payload.startswith(b"%PDF"):
+            raise ValueError("NH농협손해보험 PDF 다운로드에 실패했습니다.")
+
+        filename = resolved_name or preferred_name or f"nhfire-{product_code}-{seq}.pdf"
+        return payload, filename, content_type
+
+    @classmethod
+    def detail_page_url(cls, product_code: str) -> str:
+        return f"{cls.base}/product/retrieveProduct.nhfire?pdtCd={urllib.parse.quote(product_code)}"
+
+    @staticmethod
+    def extract_revision(value: str | None) -> str | None:
+        if not value:
+            return None
+        compact = re.sub(r"[^0-9]", "", value)
+        if len(compact) >= 8:
+            return f"{compact[:4]}-{compact[4:6]}-{compact[6:8]}"
+        match = re.search(r"(?<!\d)(\d{2})(0[1-9]|1[0-2])(?!\d)", compact)
+        if match:
+            return f"20{match.group(1)}-{match.group(2)}-01"
+        dotted = re.search(r"(?<!\d)(\d{2})\.(\d{1,2})(?!\d)", value)
+        if dotted:
+            return f"20{dotted.group(1)}-{int(dotted.group(2)):02d}-01"
+        return None
+
+
+class NhFireLiveAdapter:
+    base = "https://www.nhfire.co.kr"
+    source_url = f"{base}/announce/productAnnounce/retrieveInsuranceProductsAnnounce.nhfire"
+    disclosure_ajax_url = f"{base}/front/announce/retrievePdtInfo.ajax"
+    detail_url = f"{base}/product/retrieveProduct.nhfire"
+    CACHE_SECONDS = 600
+    _catalog_cache: tuple[float, list[dict[str, Any]]] | None = None
+    _detail_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+    @classmethod
+    def search(cls, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        ranked = []
+        for item in cls.fetch_catalog():
+            score = score_text(query, item["productName"], item.get("insuranceType", ""), item.get("productCode", ""))
+            if score <= 0:
+                continue
+            ranked.append({**item, "score": score})
+
+        candidates = sorted(
+            unique_by(ranked, "productCode", "productName"),
+            key=lambda item: (-item["score"], item["productName"]),
+        )
+
+        enriched = []
+        for item in candidates[: max(limit * 4, 8)]:
+            detail = cls.fetch_detail(item["productCode"])
+            merged = {**item, **detail}
+            merged["score"] = score_text(
+                query,
+                merged["productName"],
+                merged.get("insuranceType", ""),
+                merged.get("keywords", ""),
+                " ".join(doc.get("type", "") for doc in merged.get("documents", [])),
+                merged.get("productCode", ""),
+            )
+            enriched.append(merged)
+
+        return sorted(
+            unique_by(enriched, "productCode", "productName"),
+            key=lambda item: (-item["score"], item["productName"]),
+        )[:limit]
+
+    @classmethod
+    def fetch_catalog(cls) -> list[dict[str, Any]]:
+        cached = cls._catalog_cache
+        now = time.time()
+        if cached and now - cached[0] < cls.CACHE_SECONDS:
+            return [dict(item) for item in cached[1]]
+
+        html = fetch_text(cls.source_url, encoding="utf-8")
+        category_positions = [
+            {"start": match.start(), "category": clean_html(match.group(2) or match.group(1) or "")}
+            for match in re.finditer(
+                r'<a href="javascript:void\(0\);" onclick="fnRetrieveProductInfo\(\'[A-Z0-9]+\'\)(?:;return false;)?"\s+title="([^"]*)">([^<]+)</a>',
+                html,
+                re.S,
+            )
+        ]
+
+        products: list[dict[str, Any]] = []
+        for match in re.finditer(
+            r'<a href="/product/retrieveProduct\.nhfire\?pdtCd=([A-Z0-9]+)"\s+title="([^"]+)"[^>]*>(.*?)</a>',
+            html,
+            re.S,
+        ):
+            product_code = match.group(1)
+            product_name = clean_html(match.group(3) or match.group(2))
+            if not product_name:
+                continue
+            products.append(
+                {
+                    "provider": "nhfire",
+                    "insurerName": "NH농협손해보험",
+                    "productName": product_name,
+                    "productCode": product_code,
+                    "insuranceType": cls.category_for_position(category_positions, match.start()),
+                    "status": "판매중",
+                    "sourceUrl": cls.detail_page_url(product_code),
+                    "documents": [],
+                    "saleStartDate": None,
+                    "saleEndDate": None,
+                    "updatedAt": None,
+                    "officialSource": "NH농협손해보험 상품공시",
+                    "keywords": "",
+                }
+            )
+
+        catalog = unique_by(products, "productCode", "productName")
+        cls._catalog_cache = (now, catalog)
+        return [dict(item) for item in catalog]
+
+    @staticmethod
+    def category_for_position(categories: list[dict[str, Any]], position: int) -> str:
+        current = ""
+        for item in categories:
+            if item["start"] > position:
+                break
+            current = item["category"]
+        return current
+
+    @classmethod
+    def fetch_detail(cls, product_code: str) -> dict[str, Any]:
+        cached = cls._detail_cache.get(product_code)
+        now = time.time()
+        if cached and now - cached[0] < cls.CACHE_SECONDS:
+            return dict(cached[1])
+
+        html = fetch_text(cls.detail_page_url(product_code), encoding="utf-8")
+        keywords_match = re.search(r'<ul class="bar_area">\s*<li>\s*(.*?)\s*</li>', html, re.S)
+        keywords = clean_html(keywords_match.group(1)) if keywords_match else ""
+        disclosure = cls.fetch_disclosure(product_code)
+        detail = {
+            "documents": disclosure["documents"],
+            "saleStartDate": disclosure["saleStartDate"],
+            "saleEndDate": disclosure["saleEndDate"],
+            "updatedAt": disclosure["updatedAt"],
+            "keywords": keywords,
+        }
+        if not detail["documents"]:
+            detail["documents"] = cls.parse_detail_terms(product_code, html)
+            if detail["documents"] and not detail["updatedAt"]:
+                detail["updatedAt"] = detail["documents"][0].get("revisionDate")
+        cls._detail_cache[product_code] = (now, detail)
+        return dict(detail)
+
+    @classmethod
+    def fetch_disclosure(cls, product_code: str) -> dict[str, Any]:
+        jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+        opener.open(urllib.request.Request(cls.source_url, headers={"User-Agent": USER_AGENT}), timeout=30).read()
+        query = urllib.parse.urlencode({"type": "ajax", "fileType": "05", "pdtCd": product_code})
+        request = urllib.request.Request(
+            f"{cls.disclosure_ajax_url}?{query}",
+            headers={"User-Agent": USER_AGENT, "Referer": cls.source_url, "X-Requested-With": "XMLHttpRequest"},
+        )
+        xml_text = opener.open(request, timeout=30).read().decode("utf-8", errors="ignore")
+        rows = cls.parse_disclosure_rows(xml_text)
+        row = cls.pick_current_row(rows)
+        if not row:
+            return {"documents": [], "saleStartDate": None, "saleEndDate": None, "updatedAt": None}
+        return {
+            "documents": cls.documents_from_row(product_code, row),
+            "saleStartDate": clean_date(row.get("pdtSelStDt")),
+            "saleEndDate": clean_date(row.get("pdtSelEdDt")),
+            "updatedAt": clean_date(row.get("pdtSelStDt")),
+        }
+
+    @staticmethod
+    def parse_disclosure_rows(xml_text: str) -> list[dict[str, str]]:
+        root = ET.fromstring(xml_text)
+        multi = root.find(".//LMultiData")
+        if multi is None:
+            return []
+        grouped: dict[str, list[str]] = {}
+        for child in multi:
+            grouped.setdefault(child.tag, []).append((child.text or "").strip())
+        row_count = max((len(values) for values in grouped.values()), default=0)
+        return [{key: values[index] if index < len(values) else "" for key, values in grouped.items()} for index in range(row_count)]
+
+    @staticmethod
+    def pick_current_row(rows: list[dict[str, str]]) -> dict[str, str] | None:
+        if not rows:
+            return None
+        def row_key(row: dict[str, str]) -> tuple[int, str]:
+            end_date = row.get("pdtSelEdDt") or ""
+            current_flag = 0 if end_date in {"99991231", "29991231", ""} else 1
+            return (current_flag, -(int(row.get("pdtSelStDt") or "0")))
+        return sorted(rows, key=row_key)[0]
+
+    @classmethod
+    def documents_from_row(cls, product_code: str, row: dict[str, str]) -> list[dict[str, Any]]:
+        file_id = (row.get("fileId") or "").strip()
+        revision_date = clean_date(row.get("pdtSelStDt"))
+        mappings = [
+            ("plcndAfileSeqn", "plcndAfileNm", "보험약관"),
+            ("bzMtdAfileSeqn", "bzMtdAfileNm", "사업방법서"),
+            ("smmrAfileSeqn", "smmrAfileNm", "상품요약서"),
+        ]
+        documents = []
+        for seq_key, name_key, doc_type in mappings:
+            seq = (row.get(seq_key) or "").strip()
+            filename = (row.get(name_key) or "").strip()
+            if not file_id or not seq or not filename:
+                continue
+            documents.append(
+                {
+                    "type": doc_type,
+                    "title": doc_type,
+                    "displayTitle": doc_type,
+                    "url": (
+                        f"/api/download/nhfire?pdtCd={urllib.parse.quote(product_code)}"
+                        f"&fileId={urllib.parse.quote(file_id)}&seq={urllib.parse.quote(seq)}&name={urllib.parse.quote(filename)}"
+                    ),
+                    "revisionDate": revision_date or cls.extract_revision(filename),
+                    "saleStartDate": clean_date(row.get("pdtSelStDt")),
+                    "saleEndDate": clean_date(row.get("pdtSelEdDt")),
+                    "format": "PDF",
+                }
+            )
+        return documents
+
+    @classmethod
+    def parse_detail_terms(cls, product_code: str, html: str) -> list[dict[str, Any]]:
+        documents = []
+        seen: set[tuple[str, str]] = set()
+        for file_id, seq, filename in re.findall(r"fnPdtFileDownload\('([^']+)',\s*'([^']+)',\s*'([^']*)'\)", html):
+            filename = filename.strip()
+            if not filename:
+                continue
+            signature = (file_id, seq)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            doc_type = "보험약관"
+            documents.append(
+                {
+                    "type": doc_type,
+                    "title": doc_type,
+                    "displayTitle": doc_type,
+                    "url": (
+                        f"/api/download/nhfire?pdtCd={urllib.parse.quote(product_code)}"
+                        f"&fileId={urllib.parse.quote(file_id)}&seq={urllib.parse.quote(seq)}&name={urllib.parse.quote(filename)}"
+                    ),
+                    "revisionDate": cls.extract_revision(filename),
+                    "saleStartDate": None,
+                    "saleEndDate": None,
+                    "format": "PDF",
+                }
+            )
+        return documents
+
+    @classmethod
+    def download_document(cls, product_code: str, seq: str, preferred_name: str = "", file_id: str = "") -> tuple[bytes, str, str]:
+        jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+        landing_html = opener.open(urllib.request.Request(cls.source_url, headers={"User-Agent": USER_AGENT}), timeout=30).read().decode("utf-8", errors="ignore")
+        action_match = re.search(r'"(/imageView/downloadFile\.ajax;jsessionid=[^"]+)"', landing_html)
+        if not action_match:
+            raise ValueError("NH농협손해보험 다운로드 경로를 찾지 못했습니다.")
+
+        resolved_file_id = file_id.strip()
+        resolved_name = preferred_name.strip()
+        if not resolved_file_id:
+            disclosure = cls.fetch_disclosure(product_code)
+            for document in disclosure["documents"]:
+                parsed = urllib.parse.urlparse(document["url"])
+                params = urllib.parse.parse_qs(parsed.query)
+                if params.get("seq", [""])[0] == seq:
+                    resolved_file_id = params.get("fileId", [""])[0]
+                    resolved_name = urllib.parse.unquote(params.get("name", [""])[0]) or resolved_name
+                    break
+        if not resolved_file_id:
+            raise ValueError("NH농협손해보험 문서 정보를 찾지 못했습니다.")
+
+        body = urllib.parse.urlencode({"fileId": resolved_file_id, "afileSeqn": seq}).encode("utf-8")
+        request = urllib.request.Request(
+            urllib.parse.urljoin(cls.base, action_match.group(1)),
+            data=body,
+            headers={
+                "User-Agent": USER_AGENT,
+                "Referer": cls.source_url,
+                "Origin": cls.base,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            method="POST",
+        )
+        with opener.open(request, timeout=30) as response:
+            payload = response.read()
+            content_type = response.getheader("Content-Type") or "application/octet-stream"
+        if not payload.startswith(b"%PDF"):
+            raise ValueError("NH농협손해보험 PDF 다운로드에 실패했습니다.")
+        return payload, (resolved_name or preferred_name or f"nhfire-{product_code}-{seq}.pdf"), content_type
+
+    @classmethod
+    def detail_page_url(cls, product_code: str) -> str:
+        return f"{cls.detail_url}?pdtCd={urllib.parse.quote(product_code)}"
+
+    @staticmethod
+    def extract_revision(value: str | None) -> str | None:
+        if not value:
+            return None
+        compact = re.sub(r"[^0-9]", "", value)
+        if len(compact) >= 8:
+            return f"{compact[:4]}-{compact[4:6]}-{compact[6:8]}"
+        dotted = re.search(r"(?<!\d)(\d{2})\.(\d{1,2})(?!\d)", value)
+        if dotted:
+            return f"20{dotted.group(1)}-{int(dotted.group(2)):02d}-01"
+        month = re.search(r"(?<!\d)(\d{2})(0[1-9]|1[0-2])(?!\d)", compact)
+        if month:
+            return f"20{month.group(1)}-{month.group(2)}-01"
+        return None
 
 
 class HanwhaFireAdapter:
@@ -1538,7 +2190,7 @@ def landing_result(provider_key: str, query: str) -> list[dict[str, Any]]:
 
 def search_all(raw_query: str) -> dict[str, Any]:
     context = parse_query(raw_query)
-    provider_keys = [context.insurer_key] if context.insurer_key else ["kb", "db", "hyundai", "samsung", "lotte", "meritz", "heungkuk", "hanwhafire"]
+    provider_keys = [context.insurer_key] if context.insurer_key else ["kb", "db", "hyundai", "samsung", "lotte", "nhfire", "meritz", "heungkuk", "hanwhafire"]
     results = []
     errors = []
     for provider_key in provider_keys:
@@ -1553,6 +2205,8 @@ def search_all(raw_query: str) -> dict[str, Any]:
                 results.extend(SamsungAdapter.search(context.product_query))
             elif provider_key == "lotte":
                 results.extend(LotteAdapter.search(context.product_query))
+            elif provider_key == "nhfire":
+                results.extend(NhFireLiveAdapter.search(context.product_query))
             elif provider_key == "meritz":
                 results.extend(MeritzAdapter.search(context.product_query))
             elif provider_key == "heungkuk":
@@ -1616,6 +2270,28 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             self.send_response(200)
             self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Disposition", f"inline; filename*=UTF-8''{urllib.parse.quote(filename)}")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if parsed.path in {"/api/download/nhfire", "/api/nhfire_download", "/api/nhfire-download"}:
+            params = urllib.parse.parse_qs(parsed.query)
+            product_code = params.get("pdtCd", [""])[0].strip()
+            file_id = params.get("fileId", [""])[0].strip()
+            seq = params.get("seq", [""])[0].strip()
+            preferred_name = params.get("name", ["nhfire.pdf"])[0].strip() or "nhfire.pdf"
+            if not product_code or not seq:
+                self.send_json({"error": "pdtCd and seq are required"}, status=400)
+                return
+            try:
+                body, filename, content_type = NhFireLiveAdapter.download_document(product_code, seq, preferred_name, file_id)
+            except Exception as exc:
+                self.send_json({"error": str(exc)}, status=502)
+                return
+            guessed_type = mimetypes.guess_type(filename)[0] or content_type or "application/pdf"
+            self.send_response(200)
+            self.send_header("Content-Type", guessed_type)
             self.send_header("Content-Disposition", f"inline; filename*=UTF-8''{urllib.parse.quote(filename)}")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
