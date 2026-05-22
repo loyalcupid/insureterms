@@ -11,10 +11,11 @@ class handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
 
-        query = urllib.parse.parse_qs(parsed.query).get("q", [""])[0].strip()
+        params = urllib.parse.parse_qs(parsed.query)
+        query = params.get("q", [""])[0].strip()
+        insurer_key = params.get("insurer", [""])[0].strip() or None
         if not query:
             AppHandler.send_json(self, {"error": "query is required"}, status=400)
             return
 
-        AppHandler.send_json(self, search_all(query))
-
+        AppHandler.send_json(self, search_all(query, insurer_key))
