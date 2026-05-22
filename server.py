@@ -74,6 +74,20 @@ INSURER_REGISTRY = {
         "type": "live",
         "official_url": "https://www.nhfire.co.kr/announce/productAnnounce/retrieveInsuranceProductsAnnounce.nhfire",
     },
+    "mg": {
+        "name": "MG손해보험(예별손해보험)",
+        "aliases": [
+            "mg손해보험",
+            "mg손보",
+            "mg",
+            "예별손해보험",
+            "예별손보",
+            "yebyeol",
+            "mggeneral",
+        ],
+        "type": "live",
+        "official_url": "https://www.yebyeol.co.kr/PB031210DM.scp?menuId=MN0803006",
+    },
     "hanwha": {
         "name": "한화생명",
         "aliases": ["한화생명", "한화"],
@@ -211,22 +225,34 @@ class SearchContext:
     product_query: str
 
 
-def parse_query(raw_query: str) -> SearchContext:
-    lowered = raw_query.lower()
-    insurer_key = None
-    insurer_name = None
-    cleaned = raw_query
-    for key, config in INSURER_REGISTRY.items():
-        aliases = sorted(config["aliases"], key=len, reverse=True)
-        for alias in aliases:
-            if alias.lower() in lowered:
-                insurer_key = key
-                insurer_name = config["name"]
-                cleaned = re.sub(re.escape(alias), " ", cleaned, flags=re.IGNORECASE)
-                cleaned = re.sub(re.escape(config["name"]), " ", cleaned, flags=re.IGNORECASE)
+def strip_insurer_terms(query: str, insurer_key: str | None) -> str:
+    if not insurer_key or insurer_key not in INSURER_REGISTRY:
+        return query
+    cleaned = query
+    config = INSURER_REGISTRY[insurer_key]
+    for alias in sorted([config["name"], *config["aliases"]], key=len, reverse=True):
+        cleaned = re.sub(re.escape(alias), " ", cleaned, flags=re.IGNORECASE)
+    return cleaned
+
+
+def parse_query(raw_query: str, forced_insurer_key: str | None = None) -> SearchContext:
+    insurer_key = forced_insurer_key if forced_insurer_key in INSURER_REGISTRY else None
+    insurer_name = INSURER_REGISTRY[insurer_key]["name"] if insurer_key else None
+    cleaned = strip_insurer_terms(raw_query, insurer_key)
+
+    if not insurer_key:
+        lowered = raw_query.lower()
+        for key, config in INSURER_REGISTRY.items():
+            aliases = sorted(config["aliases"], key=len, reverse=True)
+            for alias in aliases:
+                if alias.lower() in lowered:
+                    insurer_key = key
+                    insurer_name = config["name"]
+                    cleaned = strip_insurer_terms(raw_query, insurer_key)
+                    break
+            if insurer_key:
                 break
-        if insurer_key:
-            break
+
     product_query = cleaned
     for term in GENERIC_TERMS:
         product_query = product_query.replace(term, " ")
@@ -595,9 +621,9 @@ class MeritzAdapter:
             if score <= 0:
                 continue
             item["score"] = score
-            products.append(item)
+            candidates.append(item)
 
-        ranked = sorted(products, key=lambda item: (-item["score"], item["productName"]))
+        ranked = sorted(candidates, key=lambda item: (-item["score"], item["productName"]))
         enriched = []
         for item in ranked[:limit]:
             item["documents"] = cls.fetch_documents(item["documentProductCode"])
@@ -1786,6 +1812,334 @@ class NhFireLiveAdapter:
         return None
 
 
+class MgAdapter:
+    base = "https://www.yebyeol.co.kr"
+    current_source_url = f"{base}/PB031210DM.scp?menuId=MN0803006"
+    stopped_source_url = f"{base}/PB031220DM.scp?menuId=MN0803006"
+    list_api_url = f"{base}/PB031210_001.ajax"
+    download_form_url = f"{base}/PB031130_003.form"
+    CACHE_SECONDS = 600
+    _catalog_cache: tuple[float, list[dict[str, Any]]] | None = None
+    _rows_cache: dict[tuple[str, str, str], tuple[float, list[dict[str, Any]]]] = {}
+
+    CATEGORY_CODES = {
+        "L": [
+            ("06", "상해"),
+            ("07", "운전자"),
+            ("15", "건강"),
+            ("16", "어린이"),
+            ("09", "재물"),
+            ("17", "실손"),
+            ("10", "저축"),
+            ("18", "연금저축"),
+            ("19", "방카슈랑스"),
+            ("20", "CM"),
+            ("04", "독립특약"),
+            ("21", "단체"),
+        ],
+        "A": [
+            ("01", "개인용"),
+            ("02", "업무용"),
+            ("03", "영업용"),
+            ("04", "운전자"),
+            ("05", "이륜차"),
+            ("06", "취급업자"),
+            ("07", "공동물건"),
+            ("99", "기타"),
+        ],
+        "G": [
+            ("01", "상해보험"),
+            ("02", "일반"),
+            ("03", "특종보험"),
+            ("04", "화재보험"),
+            ("05", "방카슈랑스"),
+        ],
+    }
+
+    DOC_TYPES = {
+        "1": "상품요약서",
+        "2": "보험약관",
+        "3": "사업방법서",
+    }
+
+    @classmethod
+    def search(cls, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        products = cls.search_categories(query, cls.category_plan(query))
+        if products:
+            return products[:limit]
+        return cls.search_categories(query, [(lccd, mccd, category_name) for lccd, categories in cls.CATEGORY_CODES.items() for mccd, category_name in categories])[:limit]
+
+    @classmethod
+    def search_categories(cls, query: str, categories: list[tuple[str, str, str]]) -> list[dict[str, Any]]:
+        products: list[dict[str, Any]] = []
+        for sale_flag in ["0", "1"]:
+            for lccd, mccd, category_name in categories:
+                for row in cls.fetch_cached_rows(lccd, mccd, sale_flag):
+                    item = cls.row_to_result(row, lccd, mccd, category_name)
+                    if not item:
+                        continue
+                    score = score_text(
+                        query,
+                        item["productName"],
+                        item.get("insuranceType", ""),
+                        item.get("keywords", ""),
+                        item.get("productCode", ""),
+                    )
+                    if score <= 0:
+                        continue
+                    products.append({**item, "score": score})
+
+        return sorted(
+            unique_by(products, "id", "productName"),
+            key=lambda item: (-item["score"], 0 if item.get("status") == "판매중" else 1, item["productName"]),
+        )
+
+    @classmethod
+    def fetch_catalog(cls) -> list[dict[str, Any]]:
+        cached = cls._catalog_cache
+        now = time.time()
+        if cached and now - cached[0] < cls.CACHE_SECONDS:
+            return [dict(item) for item in cached[1]]
+
+        products: list[dict[str, Any]] = []
+        for sale_flag, source_url in [("0", cls.current_source_url), ("1", cls.stopped_source_url)]:
+            opener, token = cls.open_session(source_url)
+            for lccd, categories in cls.CATEGORY_CODES.items():
+                for mccd, category_name in categories:
+                    rows = cls.fetch_rows(opener, token, source_url, lccd, mccd, sale_flag)
+                    for row in rows:
+                        item = cls.row_to_result(row, lccd, mccd, category_name)
+                        if item:
+                            products.append(item)
+
+        catalog = unique_by(products, "id", "productName")
+        cls._catalog_cache = (now, catalog)
+        return [dict(item) for item in catalog]
+
+    @classmethod
+    def fetch_cached_rows(cls, lccd: str, mccd: str, sale_flag: str) -> list[dict[str, Any]]:
+        cache_key = (sale_flag, lccd, mccd)
+        cached = cls._rows_cache.get(cache_key)
+        now = time.time()
+        if cached and now - cached[0] < cls.CACHE_SECONDS:
+            return [dict(item) for item in cached[1]]
+
+        source_url = cls.current_source_url if sale_flag == "0" else cls.stopped_source_url
+        opener, token = cls.open_session(source_url)
+        try:
+            rows = cls.fetch_rows(opener, token, source_url, lccd, mccd, sale_flag)
+        except Exception:
+            rows = []
+        cls._rows_cache[cache_key] = (now, rows)
+        return [dict(item) for item in rows]
+
+    @classmethod
+    def open_session(cls, source_url: str) -> tuple[urllib.request.OpenerDirector, str]:
+        jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+        request = urllib.request.Request(source_url, headers={"User-Agent": USER_AGENT})
+        html = opener.open(request, timeout=30).read().decode("utf-8", errors="ignore")
+        token_match = re.search(r'name="comToken"\s+value="([^"]+)"', html)
+        if not token_match:
+            raise ValueError("MG손해보험 세션 토큰을 찾지 못했습니다.")
+        return opener, token_match.group(1)
+
+    @classmethod
+    def fetch_rows(
+        cls,
+        opener: urllib.request.OpenerDirector,
+        token: str,
+        source_url: str,
+        lccd: str,
+        mccd: str,
+        sale_flag: str,
+    ) -> list[dict[str, Any]]:
+        payload = urllib.parse.urlencode(
+            {
+                "searchPrdtLccd": lccd,
+                "searchPrdtMccd": mccd,
+                "searchPrdtSaleYn": sale_flag,
+                "searchText": "",
+                "menuId": "MN0803006",
+                "comToken": token,
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            cls.list_api_url,
+            data=payload,
+            headers={
+                "User-Agent": USER_AGENT,
+                "Referer": source_url,
+                "X-Requested-With": "XMLHttpRequest",
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            },
+            method="POST",
+        )
+        response = json.loads(opener.open(request, timeout=30).read().decode("utf-8", errors="ignore"))
+        if response.get("prcSts") not in {"N", None}:
+            raise ValueError(response.get("resMsg") or "MG손해보험 상품목록 조회에 실패했습니다.")
+        return response.get("list", {}).get("rows", []) or []
+
+    @classmethod
+    def row_to_result(cls, row: dict[str, Any], lccd: str, mccd: str, category_name: str) -> dict[str, Any] | None:
+        product_name = (row.get("inskdAbbrNm") or row.get("inskdRpsntNm") or row.get("inskdNm") or "").strip()
+        data_id = str(row.get("dataIdno") or "").strip()
+        if not product_name or not data_id:
+            return None
+
+        documents = cls.documents_from_row(row)
+        sale_flag = str(row.get("prdtSaleYn") or "")
+        status = "판매중" if sale_flag == "0" else "판매중지"
+        sale_start = clean_date(row.get("saleDate"))
+        sale_end = clean_date(row.get("saleEnddt"))
+        updated_at = max((doc.get("revisionDate") or "" for doc in documents), default="") or sale_start
+        period_label = "현재 판매상품목록" if sale_flag == "0" else "판매중지상품"
+
+        return {
+            "id": f"mg-{data_id}",
+            "provider": "mg",
+            "insurerName": "MG손해보험(예별손해보험)",
+            "productName": product_name,
+            "productCode": data_id,
+            "groupCode": str(row.get("inskdRpsntCd") or ""),
+            "insuranceType": cls.category_label(lccd, mccd, category_name),
+            "status": status,
+            "sourceUrl": cls.current_source_url if sale_flag == "0" else cls.stopped_source_url,
+            "documents": documents,
+            "saleStartDate": sale_start,
+            "saleEndDate": sale_end,
+            "updatedAt": updated_at,
+            "officialSource": f"예별손해보험 상품공시실({period_label})",
+            "keywords": " ".join(
+                filter(
+                    None,
+                    [
+                        row.get("inskdRpsntNm"),
+                        row.get("inskdAbbrNm"),
+                        row.get("inskdNm"),
+                        category_name,
+                    ],
+                )
+            ),
+        }
+
+    @classmethod
+    def documents_from_row(cls, row: dict[str, Any]) -> list[dict[str, Any]]:
+        documents: list[dict[str, Any]] = []
+        sale_flag = str(row.get("prdtSaleYn") or "")
+        data_id = str(row.get("dataIdno") or "").strip()
+        for doc_cfcd, doc_type in cls.DOC_TYPES.items():
+            original_name = (row.get(f"doc{doc_cfcd}Org") or "").strip()
+            if not original_name:
+                continue
+            params = urllib.parse.urlencode(
+                {
+                    "dataIdno": data_id,
+                    "docCfcd": doc_cfcd,
+                    "saleYn": sale_flag,
+                    "name": original_name,
+                }
+            )
+            documents.append(
+                {
+                    "type": doc_type,
+                    "title": original_name,
+                    "displayTitle": doc_type,
+                    "url": f"/api/download/mg?{params}",
+                    "revisionDate": cls.extract_revision(original_name) or clean_date(row.get("saleDate")),
+                    "saleStartDate": clean_date(row.get("saleDate")),
+                    "saleEndDate": clean_date(row.get("saleEnddt")),
+                    "format": cls.document_format(original_name),
+                }
+            )
+        return documents
+
+    @classmethod
+    def download_document(cls, data_id: str, doc_cfcd: str, sale_flag: str = "0", preferred_name: str = "") -> tuple[bytes, str, str]:
+        source_url = cls.current_source_url if sale_flag == "0" else cls.stopped_source_url
+        opener, token = cls.open_session(source_url)
+        payload = urllib.parse.urlencode(
+            {
+                "dataIdno": data_id,
+                "docCfcd": doc_cfcd,
+                "menuId": "MN0803006",
+                "comToken": token,
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            cls.download_form_url,
+            data=payload,
+            headers={
+                "User-Agent": USER_AGENT,
+                "Referer": source_url,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            method="POST",
+        )
+        with opener.open(request, timeout=30) as response:
+            body = response.read()
+            content_type = response.getheader("Content-Type") or "application/octet-stream"
+            disposition = response.getheader("Content-Disposition") or ""
+        if not body:
+            raise ValueError("MG손해보험 문서 다운로드에 실패했습니다.")
+        filename = preferred_name.strip() or cls.filename_from_disposition(disposition) or f"mg-{data_id}-{doc_cfcd}.pdf"
+        return body, filename, content_type
+
+    @staticmethod
+    def category_label(lccd: str, mccd: str, category_name: str) -> str:
+        prefixes = {"L": "장기보험", "A": "자동차보험", "G": "일반보험"}
+        prefix = prefixes.get(lccd, "")
+        return f"{prefix}/{category_name}" if prefix else category_name
+
+    @classmethod
+    def category_plan(cls, query: str) -> list[tuple[str, str, str]]:
+        normalized = normalize_text(query)
+        if any(token in normalized for token in ["자동차", "이륜", "업무용", "영업용", "개인용"]):
+            return [("A", mccd, name) for mccd, name in cls.CATEGORY_CODES["A"]]
+        if any(token in normalized for token in ["화재", "재물", "배상", "골프", "여행", "특종"]):
+            return [("G", mccd, name) for mccd, name in cls.CATEGORY_CODES["G"]] + [("L", "09", "재물")]
+        if any(token in normalized for token in ["어린이", "아이", "태아", "mom", "맘"]):
+            return [("L", "16", "어린이"), ("L", "15", "건강")]
+        if any(token in normalized for token in ["실손", "의료비", "입원", "통원"]):
+            return [("L", "17", "실손"), ("L", "20", "CM"), ("L", "15", "건강")]
+        if any(token in normalized for token in ["운전자", "상해"]):
+            return [("L", "07", "운전자"), ("L", "06", "상해"), ("A", "04", "운전자")]
+        if any(token in normalized for token in ["연금", "저축"]):
+            return [("L", "18", "연금저축"), ("L", "10", "저축")]
+        if any(token in normalized for token in ["원더풀", "올케어", "건강", "암", "질병", "치아", "수술", "간병", "뇌", "심"]):
+            return [("L", "15", "건강"), ("L", "16", "어린이"), ("L", "06", "상해"), ("L", "17", "실손"), ("L", "20", "CM")]
+        return [("L", mccd, name) for mccd, name in cls.CATEGORY_CODES["L"]]
+
+    @staticmethod
+    def extract_revision(value: str | None) -> str | None:
+        if not value:
+            return None
+        full_year_matches = re.findall(r"20\d{6}", value)
+        if full_year_matches:
+            latest = full_year_matches[-1]
+            return f"{latest[:4]}-{latest[4:6]}-{latest[6:8]}"
+        compact_matches = re.findall(r"(?<!\d)\d{6}(?!\d)", value)
+        if compact_matches:
+            latest = compact_matches[-1]
+            return f"20{latest[:2]}-{latest[2:4]}-{latest[4:6]}"
+        return None
+
+    @staticmethod
+    def document_format(filename: str) -> str:
+        ext = Path(filename).suffix.lower().lstrip(".")
+        return ext.upper() if ext else "FILE"
+
+    @staticmethod
+    def filename_from_disposition(disposition: str) -> str | None:
+        match = re.search(r"filename\*=UTF-8''([^;]+)", disposition, re.I)
+        if match:
+            return urllib.parse.unquote(match.group(1))
+        match = re.search(r'filename="?([^";]+)"?', disposition, re.I)
+        if match:
+            return urllib.parse.unquote(match.group(1))
+        return None
+
+
 class HanwhaFireAdapter:
     base = "https://m.hwgeneralins.com"
     file_base = "https://www.hwgeneralins.com"
@@ -2188,9 +2542,9 @@ def landing_result(provider_key: str, query: str) -> list[dict[str, Any]]:
     ]
 
 
-def search_all(raw_query: str) -> dict[str, Any]:
-    context = parse_query(raw_query)
-    provider_keys = [context.insurer_key] if context.insurer_key else ["kb", "db", "hyundai", "samsung", "lotte", "nhfire", "meritz", "heungkuk", "hanwhafire"]
+def search_all(raw_query: str, insurer_key: str | None = None) -> dict[str, Any]:
+    context = parse_query(raw_query, insurer_key)
+    provider_keys = [context.insurer_key] if context.insurer_key else ["kb", "db", "hyundai", "samsung", "lotte", "nhfire", "meritz", "heungkuk", "hanwhafire", "mg"]
     results = []
     errors = []
     for provider_key in provider_keys:
@@ -2213,6 +2567,8 @@ def search_all(raw_query: str) -> dict[str, Any]:
                 results.extend(HeungkukAdapter.search(context.product_query))
             elif provider_key == "hanwhafire":
                 results.extend(HanwhaFireAdapter.search(context.product_query))
+            elif provider_key == "mg":
+                results.extend(MgAdapter.search(context.product_query))
             else:
                 results.extend(landing_result(provider_key, context.product_query))
         except Exception as exc:
@@ -2250,11 +2606,13 @@ class AppHandler(BaseHTTPRequestHandler):
             )
             return
         if parsed.path == "/api/search":
-            query = urllib.parse.parse_qs(parsed.query).get("q", [""])[0].strip()
+            params = urllib.parse.parse_qs(parsed.query)
+            query = params.get("q", [""])[0].strip()
+            insurer_key = params.get("insurer", [""])[0].strip() or None
             if not query:
                 self.send_json({"error": "query is required"}, status=400)
                 return
-            self.send_json(search_all(query))
+            self.send_json(search_all(query, insurer_key))
             return
         if parsed.path in {"/api/download/heungkuk", "/api/heungkuk_download", "/api/heungkuk-download"}:
             params = urllib.parse.parse_qs(parsed.query)
@@ -2310,6 +2668,28 @@ class AppHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(exc)}, status=502)
                 return
             guessed_type = mimetypes.guess_type(filename)[0] or content_type or "application/pdf"
+            self.send_response(200)
+            self.send_header("Content-Type", guessed_type)
+            self.send_header("Content-Disposition", f"inline; filename*=UTF-8''{urllib.parse.quote(filename)}")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if parsed.path in {"/api/download/mg", "/api/mg_download", "/api/mg-download"}:
+            params = urllib.parse.parse_qs(parsed.query)
+            data_id = params.get("dataIdno", [""])[0].strip()
+            doc_cfcd = params.get("docCfcd", [""])[0].strip()
+            sale_flag = params.get("saleYn", ["0"])[0].strip() or "0"
+            original_name = params.get("name", ["mg.pdf"])[0].strip() or "mg.pdf"
+            if not data_id or not doc_cfcd:
+                self.send_json({"error": "dataIdno and docCfcd are required"}, status=400)
+                return
+            try:
+                body, filename, content_type = MgAdapter.download_document(data_id, doc_cfcd, sale_flag, original_name)
+            except Exception as exc:
+                self.send_json({"error": str(exc)}, status=502)
+                return
+            guessed_type = mimetypes.guess_type(filename)[0] or content_type or "application/octet-stream"
             self.send_response(200)
             self.send_header("Content-Type", guessed_type)
             self.send_header("Content-Disposition", f"inline; filename*=UTF-8''{urllib.parse.quote(filename)}")
