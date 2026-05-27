@@ -1,21 +1,34 @@
 const suggestedQueries = [];
 
-const insurers = [
-  { key: "kb", name: "KB\uC190\uD574\uBCF4\uD5D8", aliases: ["kb", "kb\uC190\uD574\uBCF4\uD5D8", "kb\uC190\uBCF4", "\uCF00\uC774\uBE44"], officialUrl: "https://www.kbinsure.co.kr/CG802030001.ecs", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0" },
-  { key: "db", name: "DB\uC190\uD574\uBCF4\uD5D8", aliases: ["db", "db\uC190\uD574\uBCF4\uD5D8", "db\uC190\uBCF4", "\uB3D9\uBD80\uD654\uC7AC"], officialUrl: "https://www.idbins.com/FWMAIV1535.do", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0" },
-  { key: "hyundai", name: "\uD604\uB300\uD574\uC0C1", aliases: ["\uD604\uB300\uD574\uC0C1", "\uD604\uB300", "\uD558\uC774\uCE74"], officialUrl: "https://children.hi.co.kr/bin/CI/ON/CION3200G.jsp", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0" },
-  { key: "samsung", name: "\uC0BC\uC131\uD654\uC7AC", aliases: ["\uC0BC\uC131\uD654\uC7AC", "\uC0BC\uC131"], officialUrl: "https://www.samsungfire.com/vh/page/VH.REIF0011.do", coverage: "\uC2E4\uC81C \uACF5\uC2DD API + PDF \uC5F0\uACB0" },
-  { key: "lotte", name: "\uB86F\uB370\uC190\uD574\uBCF4\uD5D8", aliases: ["\uB86F\uB370\uC190\uD574\uBCF4\uD5D8", "\uB86F\uB370", "\uB86F\uB370\uC190\uBCF4"], officialUrl: "https://www.lotteins.co.kr/web/C/D/H/cdh190.jsp", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0" },
-  { key: "nhfire", name: "NH\uB18D\uD611\uC190\uD574\uBCF4\uD5D8", aliases: ["nh\uB18D\uD611\uC190\uD574\uBCF4\uD5D8", "nh\uB18D\uD611", "\uB18D\uD611\uC190\uD574\uBCF4\uD5D8", "\uB18D\uD611\uC190\uBCF4", "nh\uC190\uD574\uBCF4\uD5D8", "nh\uC190\uBCF4"], officialUrl: "https://www.nhfire.co.kr/announce/productAnnounce/retrieveInsuranceProductsAnnounce.nhfire", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0" },
-  { key: "meritz", name: "\uBA54\uB9AC\uCE20\uD654\uC7AC", aliases: ["\uBA54\uB9AC\uCE20\uD654\uC7AC", "\uBA54\uB9AC\uCE20", "\uBA54\uB9AC\uCE20\uC190\uBCF4"], officialUrl: "https://store.meritzfire.com/disclosure/product.do", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0" },
-  { key: "hanwhafire", name: "\uD55C\uD654\uC190\uD574\uBCF4\uD5D8", aliases: ["\uD55C\uD654\uC190\uD574\uBCF4\uD5D8", "\uD55C\uD654\uC190\uBCF4", "\uD55C\uD654\uD654\uC7AC"], officialUrl: "https://m.hwgeneralins.com/product/catalog/product-info.do", coverage: "\uC2E4\uC81C \uACF5\uC2DD API + PDF \uC5F0\uACB0" },
-  { key: "heungkuk", name: "\uD765\uAD6D\uD654\uC7AC", aliases: ["\uD765\uAD6D\uD654\uC7AC", "\uD765\uAD6D"], officialUrl: "https://m.heungkukfire.co.kr/product/insr/CPDIS0001_M00/CPDIS0001_M00.do", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0" },
-  { key: "mg", name: "MG\uC190\uD574\uBCF4\uD5D8(\uC608\uBCC4\uC190\uD574\uBCF4\uD5D8)", aliases: ["mg\uC190\uD574\uBCF4\uD5D8", "mg\uC190\uBCF4", "mg", "\uC608\uBCC4\uC190\uD574\uBCF4\uD5D8", "\uC608\uBCC4\uC190\uBCF4", "yebyeol", "mggeneral"], officialUrl: "https://www.yebyeol.co.kr/PB031210DM.scp?menuId=MN0803006", coverage: "\uC2E4\uC81C \uACF5\uC2DD AJAX + PDF \uC5F0\uACB0" },
-  { key: "hanwha", name: "\uD55C\uD654\uC0DD\uBA85", aliases: ["\uD55C\uD654\uC0DD\uBA85", "\uD55C\uD654"], officialUrl: "https://www.hanwhalife.com", coverage: "\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC5F0\uACB0" },
-  { key: "kyobo", name: "\uAD50\uBCF4\uC0DD\uBA85", aliases: ["\uAD50\uBCF4\uC0DD\uBA85", "\uAD50\uBCF4"], officialUrl: "https://www.kyobo.com", coverage: "\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC5F0\uACB0" },
+const insurerCategories = [
+  { key: "non-life", name: "\uC190\uD574\uBCF4\uD5D8\uD68C\uC0AC", description: "\uD604\uC7AC \uC57D\uAD00\uCC3E\uAE30 \uC9C0\uC6D0 \uBCF4\uD5D8\uC0AC" },
+  { key: "life", name: "\uC0DD\uBA85\uBCF4\uD5D8\uD68C\uC0AC", description: "\uD68C\uC0AC \uBAA9\uB85D\uB9CC \uC81C\uACF5, \uC57D\uAD00\uCC3E\uAE30 \uC900\uBE44 \uC911" },
 ];
 
-const mainInsurerKeys = ["meritz", "db", "kb", "samsung", "nhfire", "heungkuk", "hanwhafire", "hyundai", "lotte", "mg"];
+const insurers = [
+  { key: "kb", category: "non-life", name: "KB\uC190\uD574\uBCF4\uD5D8", aliases: ["kb", "kb\uC190\uD574\uBCF4\uD5D8", "kb\uC190\uBCF4", "\uCF00\uC774\uBE44"], officialUrl: "https://www.kbinsure.co.kr/CG802030001.ecs", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0", searchEnabled: true },
+  { key: "db", category: "non-life", name: "DB\uC190\uD574\uBCF4\uD5D8", aliases: ["db", "db\uC190\uD574\uBCF4\uD5D8", "db\uC190\uBCF4", "\uB3D9\uBD80\uD654\uC7AC"], officialUrl: "https://www.idbins.com/FWMAIV1535.do", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0", searchEnabled: true },
+  { key: "hyundai", category: "non-life", name: "\uD604\uB300\uD574\uC0C1", aliases: ["\uD604\uB300\uD574\uC0C1", "\uD604\uB300", "\uD558\uC774\uCE74"], officialUrl: "https://children.hi.co.kr/bin/CI/ON/CION3200G.jsp", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0", searchEnabled: true },
+  { key: "samsung", category: "non-life", name: "\uC0BC\uC131\uD654\uC7AC", aliases: ["\uC0BC\uC131\uD654\uC7AC", "\uC0BC\uC131"], officialUrl: "https://www.samsungfire.com/vh/page/VH.REIF0011.do", coverage: "\uC2E4\uC81C \uACF5\uC2DD API + PDF \uC5F0\uACB0", searchEnabled: true },
+  { key: "lotte", category: "non-life", name: "\uB86F\uB370\uC190\uD574\uBCF4\uD5D8", aliases: ["\uB86F\uB370\uC190\uD574\uBCF4\uD5D8", "\uB86F\uB370", "\uB86F\uB370\uC190\uBCF4"], officialUrl: "https://www.lotteins.co.kr/web/C/D/H/cdh190.jsp", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0", searchEnabled: true },
+  { key: "nhfire", category: "non-life", name: "NH\uB18D\uD611\uC190\uD574\uBCF4\uD5D8", aliases: ["nh\uB18D\uD611\uC190\uD574\uBCF4\uD5D8", "nh\uB18D\uD611", "\uB18D\uD611\uC190\uD574\uBCF4\uD5D8", "\uB18D\uD611\uC190\uBCF4", "nh\uC190\uD574\uBCF4\uD5D8", "nh\uC190\uBCF4"], officialUrl: "https://www.nhfire.co.kr/announce/productAnnounce/retrieveInsuranceProductsAnnounce.nhfire", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0", searchEnabled: true },
+  { key: "meritz", category: "non-life", name: "\uBA54\uB9AC\uCE20\uD654\uC7AC", aliases: ["\uBA54\uB9AC\uCE20\uD654\uC7AC", "\uBA54\uB9AC\uCE20", "\uBA54\uB9AC\uCE20\uC190\uBCF4"], officialUrl: "https://store.meritzfire.com/disclosure/product.do", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0", searchEnabled: true },
+  { key: "hanwhafire", category: "non-life", name: "\uD55C\uD654\uC190\uD574\uBCF4\uD5D8", aliases: ["\uD55C\uD654\uC190\uD574\uBCF4\uD5D8", "\uD55C\uD654\uC190\uBCF4", "\uD55C\uD654\uD654\uC7AC"], officialUrl: "https://m.hwgeneralins.com/product/catalog/product-info.do", coverage: "\uC2E4\uC81C \uACF5\uC2DD API + PDF \uC5F0\uACB0", searchEnabled: true },
+  { key: "heungkuk", category: "non-life", name: "\uD765\uAD6D\uD654\uC7AC", aliases: ["\uD765\uAD6D\uD654\uC7AC", "\uD765\uAD6D"], officialUrl: "https://m.heungkukfire.co.kr/product/insr/CPDIS0001_M00/CPDIS0001_M00.do", coverage: "\uC2E4\uC81C \uD06C\uB864\uB9C1 \uC5F0\uACB0", searchEnabled: true },
+  { key: "mg", category: "non-life", name: "MG\uC190\uD574\uBCF4\uD5D8(\uC608\uBCC4\uC190\uD574\uBCF4\uD5D8)", aliases: ["mg\uC190\uD574\uBCF4\uD5D8", "mg\uC190\uBCF4", "mg", "\uC608\uBCC4\uC190\uD574\uBCF4\uD5D8", "\uC608\uBCC4\uC190\uBCF4", "yebyeol", "mggeneral"], officialUrl: "https://www.yebyeol.co.kr/PB031210DM.scp?menuId=MN0803006", coverage: "\uC2E4\uC81C \uACF5\uC2DD AJAX + PDF \uC5F0\uACB0", searchEnabled: true },
+  { key: "abl-life", category: "life", name: "ABL\uC0DD\uBA85", aliases: ["abl\uC0DD\uBA85", "abl"], coverage: "\uC57D\uAD00\uCC3E\uAE30 \uC900\uBE44 \uC911", searchEnabled: false },
+  { key: "samsung-life", category: "life", name: "\uC0BC\uC131\uC0DD\uBA85", aliases: ["\uC0BC\uC131\uC0DD\uBA85"], coverage: "\uC57D\uAD00\uCC3E\uAE30 \uC900\uBE44 \uC911", searchEnabled: false },
+  { key: "db-life", category: "life", name: "DB\uC0DD\uBA85", aliases: ["db\uC0DD\uBA85"], coverage: "\uC57D\uAD00\uCC3E\uAE30 \uC900\uBE44 \uC911", searchEnabled: false },
+  { key: "kb-life", category: "life", name: "KB\uB77C\uC774\uD504", aliases: ["kb\uB77C\uC774\uD504", "kb life"], coverage: "\uC57D\uAD00\uCC3E\uAE30 \uC900\uBE44 \uC911", searchEnabled: false },
+  { key: "kyobo-life", category: "life", name: "\uAD50\uBCF4\uC0DD\uBA85", aliases: ["\uAD50\uBCF4\uC0DD\uBA85", "\uAD50\uBCF4"], coverage: "\uC57D\uAD00\uCC3E\uAE30 \uC900\uBE44 \uC911", searchEnabled: false },
+  { key: "metlife", category: "life", name: "\uBA54\uD2B8\uB77C\uC774\uD504", aliases: ["\uBA54\uD2B8\uB77C\uC774\uD504", "metlife"], coverage: "\uC57D\uAD00\uCC3E\uAE30 \uC900\uBE44 \uC911", searchEnabled: false },
+  { key: "shinhan-life", category: "life", name: "\uC2E0\uD55C\uB77C\uC774\uD504", aliases: ["\uC2E0\uD55C\uB77C\uC774\uD504"], coverage: "\uC57D\uAD00\uCC3E\uAE30 \uC900\uBE44 \uC911", searchEnabled: false },
+  { key: "tongyang-life", category: "life", name: "\uB3D9\uC591\uC0DD\uBA85", aliases: ["\uB3D9\uC591\uC0DD\uBA85"], coverage: "\uC57D\uAD00\uCC3E\uAE30 \uC900\uBE44 \uC911", searchEnabled: false },
+  { key: "linea-life", category: "life", name: "\uB77C\uC774\uB098\uC0DD\uBA85", aliases: ["\uB77C\uC774\uB098\uC0DD\uBA85", "\uB77C\uC774\uB098"], coverage: "\uC57D\uAD00\uCC3E\uAE30 \uC900\uBE44 \uC911", searchEnabled: false },
+];
+
+const insurerCategoryMap = Object.fromEntries(insurerCategories.map((category) => [category.key, category]));
+const searchableInsurers = insurers.filter((item) => item.searchEnabled);
 
 const genericTerms = ["\uBCF4\uD5D8", "\uC57D\uAD00", "\uC0C1\uD488", "\uC694\uC57D\uC11C", "\uC0AC\uC5C5\uBC29\uBC95\uC11C", "\uB2E4\uC6B4\uB85C\uB4DC", "\uAC80\uC0C9", "\uCC3E\uAE30", "\uACF5\uC2DC\uC2E4"];
 
@@ -51,11 +64,15 @@ const LABELS = {
   beforeDetail: "\uC0C1\uD488\uC744 \uC120\uD0DD\uD558\uBA74 \uC0C1\uC138 \uBB38\uC11C\uC640 \uD6C4\uC18D \uC561\uC158\uC774 \uC5EC\uAE30\uC5D0 \uD45C\uC2DC\uB429\uB2C8\uB2E4.",
   beforeDetailHint: "\uD604\uC7AC\uB294 KB\uC190\uD574\uBCF4\uD5D8, DB\uC190\uD574\uBCF4\uD5D8, \uD604\uB300\uD574\uC0C1, \uC0BC\uC131\uD654\uC7AC, \uB86F\uB370\uC190\uD574\uBCF4\uD5D8, NH\uB18D\uD611\uC190\uD574\uBCF4\uD5D8, \uBA54\uB9AC\uCE20\uD654\uC7AC, \uD765\uAD6D\uD654\uC7AC, \uD55C\uD654\uC190\uD574\uBCF4\uD5D8, MG\uC190\uD574\uBCF4\uD5D8(\uC608\uBCC4\uC190\uD574\uBCF4\uD5D8)\uC744 \uC2E4\uC81C \uC5F0\uACB0\uD558\uACE0 \uC788\uC2B5\uB2C8\uB2E4.",
   currentSale: "\uD604\uC7AC \uD310\uB9E4",
+  lifeCategoryNoticeTitle: "\uC0DD\uBA85\uBCF4\uD5D8\uC0AC \uC57D\uAD00\uCC3E\uAE30\uB294 \uC21C\uCC28\uC801\uC73C\uB85C \uCD94\uAC00\uD560 \uC608\uC815\uC785\uB2C8\uB2E4.",
+  lifeCategoryNoticeBody: "\uC6D0\uD558\uC2DC\uB294 \uD68C\uC0AC\uB97C \uBA3C\uC800 \uC120\uD0DD\uD574 \uB450\uBA74 \uB2E4\uC74C \uC5F0\uB3D9 \uC6B0\uC120\uC21C\uC704\uB97C \uC815\uD558\uAE30 \uC26C\uC6CC\uC9D1\uB2C8\uB2E4.",
+  lifeInsurerSelected: (name) => `${name} \uC57D\uAD00\uCC3E\uAE30\uB294 \uC544\uC9C1 \uC900\uBE44 \uC911\uC785\uB2C8\uB2E4.`,
 };
 
 const state = {
   query: "",
   selectedProductId: null,
+  selectedCategory: null,
   selectedInsurer: null,
   filters: { insurer: LABELS.all, docType: LABELS.all, status: LABELS.all, sort: "score" },
   rawResults: [],
@@ -74,8 +91,10 @@ const elements = {
   emptySuggestions: document.getElementById("empty-suggestions"),
   retrySimilar: document.getElementById("retry-similar"),
   suggestedKeywords: document.getElementById("suggested-keywords"),
+  insurerCategoryButtons: document.getElementById("insurer-category-buttons"),
   insurerButtons: document.getElementById("insurer-buttons"),
   productSearchArea: document.getElementById("product-search-area"),
+  lifeInsurerNotice: document.getElementById("life-insurer-notice"),
   insurerFilter: document.getElementById("insurer-filter"),
   docTypeFilter: document.getElementById("doc-type-filter"),
   statusFilter: document.getElementById("status-filter"),
@@ -111,9 +130,36 @@ function renderSuggestedKeywords() {
   elements.suggestedKeywords.innerHTML = suggestedQueries.map((query) => `<button class="chip" type="button" data-query="${query}">${query}</button>`).join("");
 }
 
+function getSelectedCategory() {
+  return insurerCategoryMap[state.selectedCategory] || null;
+}
+
+function getVisibleInsurers() {
+  if (!state.selectedCategory) return [];
+  return insurers.filter((item) => item.category === state.selectedCategory);
+}
+
+function renderInsurerCategoryButtons() {
+  if (!elements.insurerCategoryButtons) return;
+  elements.insurerCategoryButtons.innerHTML = insurerCategories
+    .map(
+      (category) => `
+        <button
+          type="button"
+          class="insurer-category-button ${state.selectedCategory === category.key ? "active" : ""}"
+          data-select-category="${category.key}"
+        >
+          <span>${category.name}</span>
+          <small>${category.description}</small>
+        </button>
+      `
+    )
+    .join("");
+}
+
 function renderInsurerButtons() {
-  const orderedInsurers = mainInsurerKeys.map((key) => insurers.find((item) => item.key === key)).filter(Boolean);
-  elements.insurerButtons.innerHTML = orderedInsurers
+  const visibleInsurers = getVisibleInsurers();
+  elements.insurerButtons.innerHTML = visibleInsurers
     .map(
       (insurer) => `
         <button
@@ -137,21 +183,41 @@ function renderAdmin() {
 }
 
 function renderSelectedInsurer() {
-  if (!state.selectedInsurer) {
+  const selectedCategory = getSelectedCategory();
+  const selectedInsurer = state.selectedInsurer;
+  const isLifeCategory = selectedCategory?.key === "life";
+  const canSearch = Boolean(selectedInsurer?.searchEnabled);
+
+  renderInsurerCategoryButtons();
+  renderInsurerButtons();
+
+  if (elements.lifeInsurerNotice) {
+    if (isLifeCategory) {
+      elements.lifeInsurerNotice.classList.remove("hidden");
+      elements.lifeInsurerNotice.innerHTML = `
+        <strong>${LABELS.lifeCategoryNoticeTitle}</strong>
+        <p class="helper-text">${selectedInsurer ? LABELS.lifeInsurerSelected(selectedInsurer.name) : LABELS.lifeCategoryNoticeBody}</p>
+      `;
+    } else {
+      elements.lifeInsurerNotice.classList.add("hidden");
+      elements.lifeInsurerNotice.innerHTML = "";
+    }
+  }
+
+  if (!selectedInsurer) {
     elements.selectedInsurer.classList.add("hidden");
     elements.selectedInsurer.innerHTML = "";
     elements.productSearchArea.classList.add("hidden");
-    renderInsurerButtons();
     return;
   }
+
   elements.selectedInsurer.classList.remove("hidden");
-  elements.productSearchArea.classList.remove("hidden");
+  elements.productSearchArea.classList.toggle("hidden", !canSearch);
   elements.selectedInsurer.innerHTML = `
-    <span class="pill">${state.selectedInsurer.name} \uC120\uD0DD\uB428</span>
-    <span class="helper-text">${state.selectedInsurer.name} \uC0C1\uD488\uBA85\uC758 \uC77C\uBD80\uB9CC \uC785\uB825\uD574\uB3C4 \uC720\uC0AC\uD55C \uC57D\uAD00\uC744 \uCC3E\uC2B5\uB2C8\uB2E4.</span>
+    <span class="pill">${selectedInsurer.name} \uC120\uD0DD\uB428</span>
+    <span class="helper-text">${canSearch ? `${selectedInsurer.name} \uC0C1\uD488\uBA85\uC758 \uC77C\uBD80\uB9CC \uC785\uB825\uD574\uB3C4 \uC720\uC0AC\uD55C \uC57D\uAD00\uC744 \uCC3E\uC2B5\uB2C8\uB2E4.` : LABELS.lifeInsurerSelected(selectedInsurer.name)}</span>
     <button type="button" class="chip" data-clear-insurer="true">\uC120\uD0DD \uD574\uC81C</button>
   `;
-  renderInsurerButtons();
 }
 
 function stripGenericTerms(text) {
@@ -179,7 +245,7 @@ function insurerMatchScore(insurer, query) {
 function findMatchingInsurers(query) {
   const compact = normalizeText(query);
   if (!compact) return [];
-  return insurers
+  return searchableInsurers
     .map((insurer) => ({ insurer, score: insurerMatchScore(insurer, query) }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || a.insurer.name.localeCompare(b.insurer.name))
@@ -411,6 +477,15 @@ async function handleSearch(query) {
     renderDetail();
     return;
   }
+  if (!state.selectedInsurer.searchEnabled) {
+    state.rawResults = [];
+    state.results = [];
+    state.selectedProductId = null;
+    buildFilters();
+    renderResults();
+    renderDetail();
+    return;
+  }
   const insurerOnly = isInsurerOnlyQuery(state.query);
   if (insurerOnly) {
     state.rawResults = findMatchingInsurers(state.query).map(toInsurerResult);
@@ -441,6 +516,7 @@ function bindEvents() {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
     const queryTarget = target.closest("[data-query]");
+    const selectCategoryTarget = target.closest("[data-select-category]");
     const selectProductTarget = target.closest("[data-select-product]");
     const selectInsurerTarget = target.closest("[data-select-insurer]");
     const clearInsurerTarget = target.closest("[data-clear-insurer]");
@@ -450,6 +526,7 @@ function bindEvents() {
       if (!query) return;
       const matchedInsurer = findMatchingInsurers(query)[0] || null;
       if (matchedInsurer) {
+        state.selectedCategory = matchedInsurer.category;
         state.selectedInsurer = matchedInsurer;
         const productQuery = stripInsurerName(query, matchedInsurer);
         elements.input.value = productQuery;
@@ -460,6 +537,24 @@ function bindEvents() {
         handleSearch(query);
       }
       document.getElementById("results-section").scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    if (selectCategoryTarget instanceof HTMLElement) {
+      const { selectCategory } = selectCategoryTarget.dataset;
+      if (!selectCategory) return;
+      state.selectedCategory = selectCategory;
+      state.selectedInsurer = null;
+      state.query = "";
+      state.rawResults = [];
+      state.results = [];
+      state.selectedProductId = null;
+      state.filters = { insurer: LABELS.all, docType: LABELS.all, status: LABELS.all, sort: "score" };
+      buildFilters();
+      renderSelectedInsurer();
+      renderResults();
+      renderDetail();
+      elements.input.value = "";
       return;
     }
 
@@ -476,6 +571,7 @@ function bindEvents() {
       const { selectInsurer } = selectInsurerTarget.dataset;
       if (!selectInsurer) return;
       state.selectedInsurer = insurers.find((item) => item.key === selectInsurer) || null;
+      state.selectedCategory = state.selectedInsurer?.category || state.selectedCategory;
       state.query = "";
       state.rawResults = [];
       state.results = [];
@@ -485,7 +581,7 @@ function bindEvents() {
       renderSelectedInsurer();
       renderResults();
       renderDetail();
-      if (state.selectedInsurer) {
+      if (state.selectedInsurer?.searchEnabled) {
         elements.input.value = "";
         elements.input.focus();
       }
@@ -528,6 +624,7 @@ function bindEvents() {
 
 function init() {
   renderSuggestedKeywords();
+  renderInsurerCategoryButtons();
   renderInsurerButtons();
   renderAdmin();
   fillSelect(elements.insurerFilter, [LABELS.all]);

@@ -176,6 +176,12 @@ h3 {
   gap: 10px;
 }
 
+.insurer-category-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .insurer-button-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -183,6 +189,7 @@ h3 {
   margin-top: 4px;
 }
 
+.insurer-category-button,
 .insurer-button {
   min-height: 86px;
   padding: 16px;
@@ -195,16 +202,24 @@ h3 {
   color: var(--text);
 }
 
+.insurer-category-button {
+  min-height: 92px;
+}
+
+.insurer-category-button span,
 .insurer-button span {
   font-size: 1.05rem;
   font-weight: 800;
 }
 
+.insurer-category-button small,
 .insurer-button small {
   color: var(--muted);
   line-height: 1.35;
 }
 
+.insurer-category-button:hover,
+.insurer-category-button.active,
 .insurer-button:hover,
 .insurer-button.active {
   background: linear-gradient(135deg, var(--primary), #208978);
@@ -212,6 +227,8 @@ h3 {
   border-color: transparent;
 }
 
+.insurer-category-button:hover small,
+.insurer-category-button.active small,
 .insurer-button:hover small,
 .insurer-button.active small {
   color: rgba(255, 255, 255, 0.78);
@@ -221,6 +238,14 @@ h3 {
   margin-top: 18px;
   padding-top: 18px;
   border-top: 1px solid rgba(38, 25, 13, 0.08);
+}
+
+.life-insurer-notice {
+  margin-top: 18px;
+  padding: 18px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(201, 109, 40, 0.2);
+  background: rgba(255, 248, 238, 0.88);
 }
 
 input,
@@ -524,6 +549,7 @@ button:hover,
   .filters,
   .admin-grid,
   .stat-grid,
+  .insurer-category-grid,
   .insurer-button-grid {
     grid-template-columns: 1fr;
   }
