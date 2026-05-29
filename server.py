@@ -264,13 +264,24 @@ class KbAdapter:
     base = "https://www.kbinsure.co.kr"
     search_url = f"{base}/CG802030001.ecs"
     detail_url = f"{base}/CG802030002.ec"
+    page_size = 10
 
     @classmethod
-    def search(cls, query: str, limit: int = 5) -> list[dict[str, Any]]:
+    def search(cls, query: str, limit: int = 20) -> list[dict[str, Any]]:
         aggregated: list[dict[str, Any]] = []
         for variant in build_query_variants(query):
-            aggregated.extend(cls.search_once(variant))
-            if len(aggregated) >= limit * 4:
+            target_row = 1
+            while True:
+                page_results = cls.search_once(variant, target_row=target_row)
+                if not page_results:
+                    break
+                aggregated.extend(page_results)
+                if len(page_results) < cls.page_size:
+                    break
+                if len(aggregated) >= limit * 8:
+                    break
+                target_row += cls.page_size
+            if len(aggregated) >= limit * 8:
                 break
 
         ranked = sorted(
@@ -291,9 +302,9 @@ class KbAdapter:
         return enriched
 
     @classmethod
-    def search_once(cls, query: str) -> list[dict[str, Any]]:
+    def search_once(cls, query: str, target_row: int = 1) -> list[dict[str, Any]]:
         params = {
-            "devonTargetRow": "1",
+            "devonTargetRow": str(target_row),
             "devonOrderBy": "",
             "gubun": "",
             "goodsNm": query,
