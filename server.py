@@ -1522,6 +1522,7 @@ class NhFireAdapter:
 class NhFireLiveAdapter:
     base = "https://www.nhfire.co.kr"
     source_url = f"{base}/announce/productAnnounce/retrieveInsuranceProductsAnnounce.nhfire"
+    search_url = f"{base}/announce/productAnnounce/retrieveInsuranceProductsAnnounceSearch.nhfire"
     disclosure_ajax_url = f"{base}/front/announce/retrievePdtInfo.ajax"
     detail_url = f"{base}/product/retrieveProduct.nhfire"
     CACHE_SECONDS = 600
@@ -1531,7 +1532,8 @@ class NhFireLiveAdapter:
     @classmethod
     def search(cls, query: str, limit: int = 10) -> list[dict[str, Any]]:
         ranked = []
-        for item in cls.fetch_catalog():
+        catalog = cls.search_catalog(query) if query.strip() else cls.fetch_catalog()
+        for item in catalog:
             score = score_text(query, item["productName"], item.get("insuranceType", ""), item.get("productCode", ""))
             if score <= 0:
                 continue
@@ -1609,6 +1611,76 @@ class NhFireLiveAdapter:
         catalog = unique_by(products, "productCode", "productName")
         cls._catalog_cache = (now, catalog)
         return [dict(item) for item in catalog]
+
+    @classmethod
+    def search_catalog(cls, query: str) -> list[dict[str, Any]]:
+        normalized_query = query.strip()
+        if not normalized_query:
+            return cls.fetch_catalog()
+
+        jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+        opener.open(urllib.request.Request(cls.search_url, headers={"User-Agent": USER_AGENT}), timeout=30).read()
+
+        body = urllib.parse.urlencode(
+            {
+                "pdtSelYn": "Y",
+                "basicDate": "",
+                "flag": "",
+                "searchWord": normalized_query,
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            cls.search_url,
+            data=body,
+            headers={
+                "User-Agent": USER_AGENT,
+                "Referer": cls.search_url,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            method="POST",
+        )
+        html = opener.open(request, timeout=30).read().decode("utf-8", errors="ignore")
+
+        block_match = re.search(r'<ul class="pdtCd_Y">(.*?)</ul>', html, re.S)
+        if not block_match:
+            return cls.fetch_catalog()
+
+        template = cls.fetch_catalog()
+        template_by_code = {item.get("productCode"): dict(item) for item in template}
+        products: list[dict[str, Any]] = []
+        for product_code, raw_name in re.findall(
+            r"fnRetrievePdtInfo\('([A-Z0-9]+)'[^)]*\)\">(.+?)</a>",
+            block_match.group(1),
+            re.S,
+        ):
+            product_name = re.sub(r"\s+", " ", clean_html(raw_name)).strip()
+            if not product_name:
+                continue
+            base_item = template_by_code.get(product_code)
+            if base_item:
+                base_item["productName"] = product_name
+                products.append(base_item)
+                continue
+            products.append(
+                {
+                    "provider": "nhfire",
+                    "insurerName": "NH농협손해보험",
+                    "productName": product_name,
+                    "productCode": product_code,
+                    "insuranceType": "",
+                    "status": "판매중",
+                    "sourceUrl": cls.detail_page_url(product_code),
+                    "documents": [],
+                    "saleStartDate": None,
+                    "saleEndDate": None,
+                    "updatedAt": None,
+                    "officialSource": "NH농협손해보험 상품공시",
+                    "keywords": "",
+                }
+            )
+
+        return unique_by(products, "productCode", "productName") or template
 
     @staticmethod
     def category_for_position(categories: list[dict[str, Any]], position: int) -> str:
