@@ -2228,6 +2228,8 @@ class HanwhaFireAdapter:
     file_base = "https://www.hwgeneralins.com"
     api_url = f"{base}/smt/prd/cmn/select-ins-gd-info"
     source_url = f"{base}/product/catalog/product-info.do"
+    current_disclosure_url = "https://www.hwgeneralins.com/notice/ir/product-ing01.do"
+    stopped_disclosure_url = "https://www.hwgeneralins.com/notice/ir/product-end01.do"
     CACHE_SECONDS = 600
     _catalog_cache: tuple[float, list[dict[str, Any]]] | None = None
 
@@ -2250,10 +2252,83 @@ class HanwhaFireAdapter:
         "LA02821001": ("가족", "한화 건강쑥쑥 어린이보험 무배당"),
     }
 
+    AUXILIARY_PRODUCTS = [
+        {
+            "productCode": "HANWHA-HANAREUM-SILSOK-GANPYEON",
+            "productName": "한화 한아름 실속 건강보험(연만기갱신형) 무배당(간편고지형)",
+            "displayName": "한화 한아름 실속 건강보험(연만기갱신형) 무배당(간편고지형)",
+            "insuranceType": "건강/종합",
+            "status": "판매중",
+            "sourceUrl": current_disclosure_url,
+            "officialSource": "한화손해보험 보험상품공시(현재판매상품)",
+            "notice": "공식 공시실 검색 결과 기반 보조 검색 결과입니다.",
+        },
+        {
+            "productCode": "HANWHA-HANAREUM-SILSOK-ILBAN",
+            "productName": "한화 한아름 실속 건강보험(연만기갱신형) 무배당(일반/건강고지형)",
+            "displayName": "한화 한아름 실속 건강보험(연만기갱신형) 무배당(일반/건강고지형)",
+            "insuranceType": "건강/종합",
+            "status": "판매중",
+            "sourceUrl": current_disclosure_url,
+            "officialSource": "한화손해보험 보험상품공시(현재판매상품)",
+            "notice": "공식 공시실 검색 결과 기반 보조 검색 결과입니다.",
+        },
+        {
+            "productCode": "HANWHA-LIFEPLUS-HANAREUM",
+            "productName": "무배당 LIFEPLUS 한아름종합보험",
+            "displayName": "무배당 LIFEPLUS 한아름종합보험",
+            "insuranceType": "건강/종합",
+            "status": "판매중지",
+            "sourceUrl": "https://www.hwgeneralins.com/upload/hmpag_upload/product/hanareum_02.pdf",
+            "officialSource": "한화손해보험 사업방법서 PDF",
+            "notice": "공식 PDF 공시 문서 기반 보조 검색 결과입니다.",
+        },
+        {
+            "productCode": "HANWHA-LIFEPLUS-HANAREUM-2204",
+            "productName": "무배당 LIFEPLUS 한아름종합보험2204",
+            "displayName": "무배당 LIFEPLUS 한아름종합보험2204",
+            "insuranceType": "건강/종합",
+            "status": "판매중지",
+            "sourceUrl": "https://www.hwgeneralins.com/upload/hmpag_upload/product/hanareum%282204%29_02.pdf",
+            "officialSource": "한화손해보험 사업방법서 PDF",
+            "notice": "공식 PDF 공시 문서 기반 보조 검색 결과입니다.",
+        },
+        {
+            "productCode": "HANWHA-LIFEPLUS-HANAREUM-2301",
+            "productName": "무배당 LIFEPLUS 한아름종합보험2301",
+            "displayName": "무배당 LIFEPLUS 한아름종합보험2301",
+            "insuranceType": "건강/종합",
+            "status": "판매중지",
+            "sourceUrl": "https://www.hwgeneralins.com/upload/hmpag_upload/product/hanareum%282301%29_02.pdf",
+            "officialSource": "한화손해보험 사업방법서 PDF",
+            "notice": "공식 PDF 공시 문서 기반 보조 검색 결과입니다.",
+        },
+        {
+            "productCode": "HANWHA-LIFEPLUS-HANAREUM-2404",
+            "productName": "LIFEPLUS 더건강한 한아름종합보험 무배당2404",
+            "displayName": "LIFEPLUS 더건강한 한아름종합보험 무배당2404",
+            "insuranceType": "건강/종합",
+            "status": "판매중지",
+            "sourceUrl": stopped_disclosure_url,
+            "officialSource": "한화손해보험 보험상품공시(판매중지상품)",
+            "notice": "공식 공시실 검색 결과 기반 보조 검색 결과입니다.",
+        },
+        {
+            "productCode": "HANWHA-LIFEPLUS-HANAREUM-LEGACY",
+            "productName": "LIFEPLUS 더건강한 한아름종합보험 무배당",
+            "displayName": "LIFEPLUS 더건강한 한아름종합보험 무배당",
+            "insuranceType": "건강/종합",
+            "status": "판매중지",
+            "sourceUrl": stopped_disclosure_url,
+            "officialSource": "한화손해보험 보험상품공시(판매중지상품)",
+            "notice": "공식 공시실 검색 결과 기반 보조 검색 결과입니다.",
+        },
+    ]
+
     @classmethod
     def search(cls, query: str, limit: int = 10) -> list[dict[str, Any]]:
         products = []
-        for item in cls.fetch_catalog():
+        for item in cls.search_catalog():
             score = score_text(
                 query,
                 item["productName"],
@@ -2270,6 +2345,12 @@ class HanwhaFireAdapter:
             unique_by(products, "productCode", "productName"),
             key=lambda item: (-item["score"], 0 if item.get("status") == "판매중" else 1, item["productName"]),
         )[:limit]
+
+    @classmethod
+    def search_catalog(cls) -> list[dict[str, Any]]:
+        products = cls.fetch_catalog()
+        products.extend(cls.auxiliary_catalog())
+        return unique_by(products, "productCode", "productName")
 
     @classmethod
     def fetch_catalog(cls) -> list[dict[str, Any]]:
@@ -2289,6 +2370,21 @@ class HanwhaFireAdapter:
 
         cls._catalog_cache = (now, products)
         return [dict(item) for item in products]
+
+    @classmethod
+    def auxiliary_catalog(cls) -> list[dict[str, Any]]:
+        products: list[dict[str, Any]] = []
+        for item in cls.AUXILIARY_PRODUCTS:
+            product = dict(item)
+            documents = cls.documents_from_auxiliary(product)
+            product["provider"] = "hanwhafire"
+            product["insurerName"] = "한화손해보험"
+            product["documents"] = documents
+            product["saleStartDate"] = None
+            product["saleEndDate"] = None
+            product["updatedAt"] = cls.extract_revision(product.get("productName")) or (documents[0]["revisionDate"] if documents else None)
+            products.append(product)
+        return products
 
     @classmethod
     def fetch_product(cls, product_code: str) -> dict[str, Any] | None:
@@ -2353,6 +2449,25 @@ class HanwhaFireAdapter:
                 "type": "보험약관",
                 "title": filename or f"{product_name} 약관.pdf",
                 "url": cls.official_file_url(str(document_path)),
+                "revisionDate": revision_date,
+                "saleStartDate": None,
+                "saleEndDate": None,
+                "format": "PDF",
+            }
+        ]
+
+    @classmethod
+    def documents_from_auxiliary(cls, item: dict[str, Any]) -> list[dict[str, Any]]:
+        source_url = str(item.get("sourceUrl") or "")
+        if not source_url.lower().endswith(".pdf"):
+            return []
+        revision_date = cls.extract_revision(item.get("productName"))
+        title = urllib.parse.unquote(source_url.rsplit("/", 1)[-1])
+        return [
+            {
+                "type": "사업방법서",
+                "title": title,
+                "url": source_url,
                 "revisionDate": revision_date,
                 "saleStartDate": None,
                 "saleEndDate": None,
