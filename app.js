@@ -71,7 +71,6 @@ const LABELS = {
 
 const state = {
   query: "",
-  selectedProductId: null,
   selectedCategory: null,
   selectedInsurer: null,
   filters: { insurer: LABELS.all, docType: LABELS.all, status: LABELS.all, sort: "score" },
@@ -83,7 +82,6 @@ const elements = {
   form: document.getElementById("search-form"),
   input: document.getElementById("search-input"),
   resultsContainer: document.getElementById("results-container"),
-  detailContainer: document.getElementById("detail-container"),
   resultsTitle: document.getElementById("results-title"),
   resultCount: document.getElementById("result-count"),
   queryDisplay: document.getElementById("query-display"),
@@ -343,9 +341,7 @@ async function fetchSearchResults(query, insurerKey = null) {
 function searchProducts(query) {
   const queryTokens = tokenize(query);
   state.results = applyFilters(state.rawResults.map((item) => ({ ...item, score: computeScore(item, queryTokens) })));
-  state.selectedProductId = state.results.find((item) => item.resultType !== "insurer")?.id ?? null;
   renderResults();
-  renderDetail();
 }
 
 function renderResults() {
@@ -404,7 +400,7 @@ function renderResults() {
 
       return `
         <article class="result-card ${index === 0 ? "featured" : ""}">
-          <div class="card-top"><div><p class="eyebrow">${item.insurerName}</p><h3>${item.productName}</h3></div><button type="button" data-select-product="${item.id}">\uC0C1\uC138 \uBCF4\uAE30</button></div>
+          <div class="card-top"><div><p class="eyebrow">${item.insurerName}</p><h3>${item.productName}</h3></div></div>
           <div class="pill-row">
             <span class="pill ${getStatusClass(item.status)}">${item.status}</span>
             ${item.updatedAt ? `<span class="pill">\uACF5\uC2DC ${item.updatedAt}</span>` : ""}
@@ -413,45 +409,10 @@ function renderResults() {
           <p class="meta-line">\uD310\uB9E4\uAE30\uAC04 ${formatDate(item.saleStartDate)} ~ ${formatDate(item.saleEndDate)}</p>
           ${item.notice ? `<p class="meta-line">${item.notice}</p>` : ""}
           <div class="doc-list">${docs || `<article class="doc-item"><h4>\uC774 \uBCF4\uD5D8\uC0AC\uB294 \uD604\uC7AC \uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC5F0\uACB0 \uC911\uC2EC\uC785\uB2C8\uB2E4.</h4><div class="action-row"><a class="doc-link" href="${item.sourceUrl}" target="_blank" rel="noreferrer">\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uC774\uB3D9</a></div></article>`}</div>
-          <div class="action-row"><a class="doc-link" href="#detail-section">\uC774 \uC57D\uAD00\uC73C\uB85C \uBD84\uC11D\uD558\uAE30</a><a class="doc-link" href="#detail-section">\uBCF4\uD5D8\uAE08 \uCCAD\uAD6C \uC0C1\uB2F4 \uC5F0\uACB0</a></div>
         </article>
       `;
     })
     .join("");
-}
-
-function renderDetail() {
-  const product = state.results.find((item) => item.id === state.selectedProductId && item.resultType !== "insurer");
-  if (!product) {
-    elements.detailContainer.innerHTML = `<article class="detail-card"><h3>${LABELS.beforeDetail}</h3><p class="detail-hint">${LABELS.beforeDetailHint}</p></article>`;
-    return;
-  }
-  elements.detailContainer.innerHTML = `
-    <article class="detail-card">
-      <p class="eyebrow">${product.insurerName}</p>
-      <h3>${product.productName}</h3>
-      <div class="detail-meta">
-        <span class="pill ${getStatusClass(product.status)}">${product.status}</span>
-        ${product.updatedAt ? `<span class="pill">\uACF5\uC2DC \uAE30\uC900\uC77C ${product.updatedAt}</span>` : ""}
-        <span class="pill">\uD310\uB9E4\uAE30\uAC04 ${formatDate(product.saleStartDate)} ~ ${formatDate(product.saleEndDate)}</span>
-      </div>
-      <p class="detail-hint">\uAC00\uC785 \uC2DC\uC810\uBCC4 \uC57D\uAD00 \uCC28\uC774 \uAC00\uB2A5\uC131\uC774 \uC788\uC73C\uBA70, \uD2B9\uC57D \uAD6C\uC131\uC5D0 \uB530\uB77C \uC2E4\uC81C \uBCF4\uC7A5\uC740 \uB2EC\uB77C\uC9C8 \uC218 \uC788\uC2B5\uB2C8\uB2E4.</p>
-      <div class="detail-docs">
-        ${(product.documents || [])
-          .map(
-            (doc) => `
-              <article class="doc-item">
-                <div class="doc-header"><div><p class="eyebrow">${doc.type}</p><h4>${doc.title}</h4></div><span class="pill">${doc.format}</span></div>
-                <p class="meta-line">\uAC1C\uC815\uC77C ${doc.revisionDate || "-"} · \uACF5\uC2DD\uCD9C\uCC98 ${product.officialSource}</p>
-                <div class="action-row"><a class="download-link" href="${doc.url}" target="_blank" rel="noreferrer">\uB2E4\uC6B4\uB85C\uB4DC</a><a class="doc-link" href="${product.sourceUrl}" target="_blank" rel="noreferrer">\uC6D0\uBB38 \uBCF4\uAE30</a></div>
-              </article>
-            `
-          )
-          .join("") || `<article class="doc-item"><h4>\uD604\uC7AC \uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uB79C\uB529 \uC5F0\uACB0 \uC911\uC785\uB2C8\uB2E4.</h4><div class="action-row"><a class="doc-link" href="${product.sourceUrl}" target="_blank" rel="noreferrer">\uACF5\uC2DD \uACF5\uC2DC\uC2E4 \uBC14\uB85C\uAC00\uAE30</a></div></article>`}
-      </div>
-      <div class="action-row"><a class="download-link" href="#">\uC774 \uC57D\uAD00\uC73C\uB85C \uBCF4\uC7A5 \uBD84\uC11D\uD558\uAE30</a><a class="doc-link" href="#">\uC218\uC220\uBE44/\uC9C4\uB2E8\uBE44 \uD655\uC778</a><a class="doc-link" href="#">\uBCF4\uD5D8\uAE08 \uCCAD\uAD6C \uC0C1\uB2F4</a></div>
-    </article>
-  `;
 }
 
 async function handleSearch(query) {
@@ -459,11 +420,9 @@ async function handleSearch(query) {
   if (!state.query) {
     state.rawResults = [];
     state.results = [];
-    state.selectedProductId = null;
     buildFilters();
     renderSelectedInsurer();
     renderResults();
-    renderDetail();
     return;
   }
 
@@ -471,19 +430,15 @@ async function handleSearch(query) {
   if (!state.selectedInsurer) {
     state.rawResults = [];
     state.results = [];
-    state.selectedProductId = null;
     buildFilters();
     renderResults();
-    renderDetail();
     return;
   }
   if (!state.selectedInsurer.searchEnabled) {
     state.rawResults = [];
     state.results = [];
-    state.selectedProductId = null;
     buildFilters();
     renderResults();
-    renderDetail();
     return;
   }
   const insurerOnly = isInsurerOnlyQuery(state.query);
@@ -517,7 +472,6 @@ function bindEvents() {
     if (!(target instanceof HTMLElement)) return;
     const queryTarget = target.closest("[data-query]");
     const selectCategoryTarget = target.closest("[data-select-category]");
-    const selectProductTarget = target.closest("[data-select-product]");
     const selectInsurerTarget = target.closest("[data-select-insurer]");
     const clearInsurerTarget = target.closest("[data-clear-insurer]");
 
@@ -548,22 +502,11 @@ function bindEvents() {
       state.query = "";
       state.rawResults = [];
       state.results = [];
-      state.selectedProductId = null;
       state.filters = { insurer: LABELS.all, docType: LABELS.all, status: LABELS.all, sort: "score" };
       buildFilters();
       renderSelectedInsurer();
       renderResults();
-      renderDetail();
       elements.input.value = "";
-      return;
-    }
-
-    if (selectProductTarget instanceof HTMLElement) {
-      const { selectProduct } = selectProductTarget.dataset;
-      if (!selectProduct) return;
-      state.selectedProductId = selectProduct;
-      renderDetail();
-      document.getElementById("detail-section").scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
 
@@ -575,12 +518,10 @@ function bindEvents() {
       state.query = "";
       state.rawResults = [];
       state.results = [];
-      state.selectedProductId = null;
       state.filters = { insurer: LABELS.all, docType: LABELS.all, status: LABELS.all, sort: "score" };
       buildFilters();
       renderSelectedInsurer();
       renderResults();
-      renderDetail();
       if (state.selectedInsurer?.searchEnabled) {
         elements.input.value = "";
         elements.input.focus();
@@ -593,12 +534,10 @@ function bindEvents() {
       state.query = "";
       state.rawResults = [];
       state.results = [];
-      state.selectedProductId = null;
       state.filters = { insurer: LABELS.all, docType: LABELS.all, status: LABELS.all, sort: "score" };
       buildFilters();
       renderSelectedInsurer();
       renderResults();
-      renderDetail();
       elements.input.value = "";
     }
   });
@@ -632,7 +571,6 @@ function init() {
   fillSelect(elements.statusFilter, [LABELS.all]);
   renderSelectedInsurer();
   renderResults();
-  renderDetail();
   bindEvents();
 }
 
