@@ -885,6 +885,19 @@ class LotteAdapter:
     }
 
     @classmethod
+    def normalize_doc_type(cls, raw_type: str) -> str:
+        label = clean_html(raw_type)
+        if label in cls.DOC_TYPE_LABELS:
+            return cls.DOC_TYPE_LABELS[label]
+        if "\uc57d\uad00" in label:
+            return "\ubcf4\ud5d8\uc57d\uad00"
+        if "\uc694\uc57d" in label:
+            return "\uc0c1\ud488\uc694\uc57d\uc11c"
+        if "\uc0ac\uc5c5\ubc29\ubc95" in label:
+            return "\uc0ac\uc5c5\ubc29\ubc95\uc11c"
+        return label
+
+    @classmethod
     def search(cls, query: str, limit: int = 10) -> list[dict[str, Any]]:
         candidates: list[dict[str, Any]] = []
         categories = cls.parse_categories(fetch_text(cls.source_url, encoding="cp949"))
@@ -1104,7 +1117,7 @@ class LotteAdapter:
         sale_start, sale_end = cls.parse_sale_period(sale_match.group(1) if sale_match else "")
         documents = []
         for href, raw_type in links:
-            doc_type = cls.DOC_TYPE_LABELS.get(clean_html(raw_type), clean_html(raw_type))
+            doc_type = cls.normalize_doc_type(raw_type)
             documents.append(
                 {
                     "type": doc_type,
