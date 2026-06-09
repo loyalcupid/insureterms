@@ -1008,7 +1008,7 @@ class LotteAdapter:
         )
         products: list[dict[str, Any]] = []
         for product_lcode, product_mcode, scode, product_name in re.findall(
-            r"step3\('([^']+)','([^']+)','([^']+)'\);classchkStep2\(\d+,\d+\);>\s*<span>(.*?)</span>",
+            r"step3\('([^']+)','([^']+)','([^']+)'\)[^<]*<span>(.*?)</span>",
             html,
         ):
             name = clean_html(product_name)
@@ -1053,7 +1053,7 @@ class LotteAdapter:
             }
         )
         periods = re.findall(
-            r"step4\('([^']+)','([^']+)','([^']+)','([^']+)'\);classchkStep3\(\d+,\d+\);><span>(.*?)</a></span>",
+            r"step4\('([^']+)','([^']+)','([^']+)','([^']+)'\)[^<]*<span>(.*?)</span>",
             html,
         )
         results = []
@@ -1086,9 +1086,9 @@ class LotteAdapter:
                 "srcPrdNm": "",
             }
         )
-        name_match = re.search(r"<dt>상품명</dt><dd><span>(.*?)</span></dd>", html)
-        sale_match = re.search(r"<dt class='pt20'>판매기간</dt><dd><span>(.*?)</span></dd>", html)
-        links = re.findall(r"<a href=([^ >]+)\s+title='새창열림_([^']+) PDF보기'[^>]*>", html)
+        name_match = re.search(r"<dt[^>]*>\s*상품명\s*</dt>\s*<dd>\s*<span>(.*?)</span></dd>", html, re.S)
+        sale_match = re.search(r"<dt[^>]*>\s*판매기간\s*</dt>\s*<dd>\s*<span>(.*?)</span></dd>", html, re.S)
+        links = re.findall(r"<a\s+href=([^ >]+)[^>]*title='[^']*?_(.*?)\s*PDF[^']*'[^>]*>", html, re.S)
         if not name_match and not links:
             return None
 
