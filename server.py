@@ -887,7 +887,14 @@ class LotteAdapter:
     @classmethod
     def search(cls, query: str, limit: int = 10) -> list[dict[str, Any]]:
         candidates: list[dict[str, Any]] = []
-        for item in cls.fetch_catalog():
+        categories = cls.parse_categories(fetch_text(cls.source_url, encoding="cp949"))
+        keyword_matches: list[dict[str, Any]] = []
+        for is_sale in [True, False]:
+            for category in categories:
+                keyword_matches.extend(cls.fetch_products(category["lcode"], category["mcode"], is_sale=is_sale, query=query))
+
+        source_items = unique_by(keyword_matches, "status", "productCode", "productName") if keyword_matches else cls.fetch_catalog()
+        for item in source_items:
             score = score_text(query, item["productName"], item.get("insuranceType", ""), item.get("productCode", ""))
             if score <= 0:
                 continue
@@ -986,12 +993,14 @@ class LotteAdapter:
     @classmethod
     def parse_categories(cls, html: str) -> list[dict[str, str]]:
         categories = []
-        for lcode, mcode in re.findall(r"step2\('([^']+)','([^']+)',\s*\d+,\s*\d+\);", html):
+        for lcode, mcode in re.findall(r"step2\('([^']+)','([^']+)'(?:,\s*\d+,\s*\d+)?\);", html):
             categories.append({"lcode": lcode, "mcode": mcode})
-        return categories
+        if categories:
+            return unique_by(categories, "lcode", "mcode")
+        return [{"lcode": lcode, "mcode": mcode} for lcode, mcode in cls.CATEGORY_LABELS.keys()]
 
     @classmethod
-    def fetch_products(cls, lcode: str, mcode: str, *, is_sale: bool) -> list[dict[str, Any]]:
+    def fetch_products(cls, lcode: str, mcode: str, *, is_sale: bool, query: str = "") -> list[dict[str, Any]]:
         task = "gostep2issale" if is_sale else "gostep2isnotsale"
         html = cls.post_form(
             {
@@ -1003,7 +1012,7 @@ class LotteAdapter:
                 "scode": "",
                 "startdate": "",
                 "issale": "Y" if is_sale else "N",
-                "srcPrdNm": "",
+                "srcPrdNm": query,
             }
         )
         products: list[dict[str, Any]] = []
