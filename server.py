@@ -1086,8 +1086,8 @@ class LotteAdapter:
                 "srcPrdNm": "",
             }
         )
-        name_match = re.search(r"<dt[^>]*>\s*상품명\s*</dt>\s*<dd>\s*<span>(.*?)</span></dd>", html, re.S)
-        sale_match = re.search(r"<dt[^>]*>\s*판매기간\s*</dt>\s*<dd>\s*<span>(.*?)</span></dd>", html, re.S)
+        name_match = re.search(r"<dt[^>]*>[^<]*</dt>\s*<dd>\s*<span>(.*?)</span></dd>", html, re.S)
+        sale_match = re.search(r"<dt[^>]*class=['\"]pt20['\"][^>]*>[^<]*</dt>\s*<dd>\s*<span>(.*?)</span></dd>", html, re.S)
         links = re.findall(r"<a\s+href=([^ >]+)[^>]*title='[^']*?_(.*?)\s*PDF[^']*'[^>]*>", html, re.S)
         if not name_match and not links:
             return None
@@ -1123,7 +1123,7 @@ class LotteAdapter:
             return None, None
         start_raw, end_raw = match.groups()
         sale_start = clean_date(start_raw)
-        sale_end = None if "현재" in end_raw else clean_date(end_raw)
+        sale_end = clean_date(end_raw)
         return sale_start, sale_end
 
     @classmethod
