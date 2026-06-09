@@ -974,7 +974,7 @@ class LotteAdapter:
 
         page_html = fetch_text(cls.source_url, encoding="cp949")
         categories = unique_by(cls.parse_categories(page_html), "lcode", "mcode")
-        catalog = unique_by(products, "productCode", "productName")
+        catalog: list[dict[str, Any]] = []
         for is_sale in [True, False]:
             for category in categories:
                 catalog.extend(cls.fetch_products(category["lcode"], category["mcode"], is_sale=is_sale))
@@ -1006,7 +1006,7 @@ class LotteAdapter:
                 "srcPrdNm": "",
             }
         )
-        candidates = []
+        products: list[dict[str, Any]] = []
         for product_lcode, product_mcode, scode, product_name in re.findall(
             r"step3\('([^']+)','([^']+)','([^']+)'\);classchkStep2\(\d+,\d+\);>\s*<span>(.*?)</span>",
             html,
