@@ -2781,30 +2781,31 @@ def landing_result(provider_key: str, query: str) -> list[dict[str, Any]]:
 def search_all(raw_query: str, insurer_key: str | None = None) -> dict[str, Any]:
     context = parse_query(raw_query, insurer_key)
     provider_keys = [context.insurer_key] if context.insurer_key else ["kb", "db", "hyundai", "samsung", "lotte", "nhfire", "meritz", "heungkuk", "hanwhafire", "mg"]
+    adapter_limit = 40
     results = []
     errors = []
     for provider_key in provider_keys:
         try:
             if provider_key == "kb":
-                results.extend(KbAdapter.search(context.product_query))
+                results.extend(KbAdapter.search(context.product_query, limit=adapter_limit))
             elif provider_key == "db":
-                results.extend(DbAdapter.search(context.product_query))
+                results.extend(DbAdapter.search(context.product_query, limit=adapter_limit))
             elif provider_key == "hyundai":
-                results.extend(HyundaiAdapter.search(context.product_query))
+                results.extend(HyundaiAdapter.search(context.product_query, limit=adapter_limit))
             elif provider_key == "samsung":
-                results.extend(SamsungAdapter.search(context.product_query))
+                results.extend(SamsungAdapter.search(context.product_query, limit=adapter_limit))
             elif provider_key == "lotte":
-                results.extend(LotteAdapter.search(context.product_query))
+                results.extend(LotteAdapter.search(context.product_query, limit=adapter_limit))
             elif provider_key == "nhfire":
-                results.extend(NhFireLiveAdapter.search(context.product_query))
+                results.extend(NhFireLiveAdapter.search(context.product_query, limit=adapter_limit))
             elif provider_key == "meritz":
-                results.extend(MeritzAdapter.search(context.product_query))
+                results.extend(MeritzAdapter.search(context.product_query, limit=adapter_limit))
             elif provider_key == "heungkuk":
-                results.extend(HeungkukAdapter.search(context.product_query))
+                results.extend(HeungkukAdapter.search(context.product_query, limit=adapter_limit))
             elif provider_key == "hanwhafire":
-                results.extend(HanwhaFireAdapter.search(context.product_query))
+                results.extend(HanwhaFireAdapter.search(context.product_query, limit=adapter_limit))
             elif provider_key == "mg":
-                results.extend(MgAdapter.search(context.product_query))
+                results.extend(MgAdapter.search(context.product_query, limit=adapter_limit))
             else:
                 results.extend(landing_result(provider_key, context.product_query))
         except Exception as exc:
