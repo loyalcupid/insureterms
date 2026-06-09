@@ -166,6 +166,44 @@ def unique_by(items: list[dict[str, Any]], *keys: str) -> list[dict[str, Any]]:
     return output
 
 
+def filter_term_documents(item: dict[str, Any]) -> dict[str, Any] | None:
+    documents = [doc for doc in (item.get("documents") or []) if doc.get("type") == "보험약관"]
+    if not documents:
+        return None
+    filtered = dict(item)
+    filtered["documents"] = documents
+    return filtered
+
+
+def product_name_matches_query(item: dict[str, Any], query: str) -> bool:
+    normalized_query = normalize_text(query)
+    product_name = normalize_text(item.get("productName", ""))
+    if not normalized_query or not product_name:
+        return False
+    if normalized_query in product_name:
+        return True
+    query_tokens = [normalize_text(token) for token in tokenize(query) if normalize_text(token)]
+    return bool(query_tokens) and all(token in product_name for token in query_tokens)
+
+
+def finalize_results(results: list[dict[str, Any]], query: str, limit: int = 20) -> list[dict[str, Any]]:
+    ranked = sorted(
+        results,
+        key=lambda item: (-item.get("score", 0), 0 if item.get("status") == "판매중" else 1, item.get("productName", "")),
+    )
+
+    filtered: list[dict[str, Any]] = []
+    for item in ranked:
+        filtered_item = filter_term_documents(item)
+        if not filtered_item:
+            continue
+        if not product_name_matches_query(filtered_item, query):
+            continue
+        filtered.append(filtered_item)
+
+    return unique_by(filtered, "provider", "productCode", "productName")[:limit]
+
+
 def build_query_variants(query: str) -> list[str]:
     base = query.strip()
     if not base:
@@ -2772,16 +2810,13 @@ def search_all(raw_query: str, insurer_key: str | None = None) -> dict[str, Any]
         except Exception as exc:
             errors.append({"provider": INSURER_REGISTRY[provider_key]["name"], "message": str(exc)})
 
-    ranked = sorted(
-        results,
-        key=lambda item: (-item.get("score", 0), 0 if item.get("status") == "판매중" else 1, item.get("productName", "")),
-    )
+    final_results = finalize_results(results, context.product_query, limit=20)
     return {
         "query": raw_query,
         "parsedInsurer": context.insurer_name,
         "parsedProduct": context.product_query,
-        "resultCount": len(ranked),
-        "results": ranked[:20],
+        "resultCount": len(final_results),
+        "results": final_results,
         "errors": errors,
         "generatedAt": int(time.time()),
     }
