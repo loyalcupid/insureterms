@@ -2292,6 +2292,7 @@ class HanwhaFireAdapter:
     stopped_disclosure_url = "https://www.hwgeneralins.com/notice/ir/product-end01.do"
     CACHE_SECONDS = 600
     _catalog_cache: tuple[float, list[dict[str, Any]]] | None = None
+    _document_exists_cache: dict[str, bool] = {}
 
     PRODUCT_META = {
         "CA00044001": ("자동차", "한화 자동차보험"),
@@ -2521,19 +2522,45 @@ class HanwhaFireAdapter:
         source_url = str(item.get("sourceUrl") or "")
         if not source_url.lower().endswith(".pdf"):
             return []
+        term_url = cls.derive_terms_pdf_url(source_url)
+        if not term_url or not cls.document_exists(term_url):
+            return []
         revision_date = cls.extract_revision(item.get("productName"))
-        title = urllib.parse.unquote(source_url.rsplit("/", 1)[-1])
+        title = urllib.parse.unquote(term_url.rsplit("/", 1)[-1])
         return [
             {
-                "type": "사업방법서",
+                "type": "보험약관",
                 "title": title,
-                "url": source_url,
+                "url": term_url,
                 "revisionDate": revision_date,
                 "saleStartDate": None,
                 "saleEndDate": None,
                 "format": "PDF",
             }
         ]
+
+    @classmethod
+    def derive_terms_pdf_url(cls, source_url: str) -> str | None:
+        if not source_url.lower().endswith(".pdf"):
+            return None
+        if re.search(r"_03\.pdf$", source_url, flags=re.IGNORECASE):
+            return source_url
+        if re.search(r"_02\.pdf$", source_url, flags=re.IGNORECASE):
+            return re.sub(r"_02\.pdf$", "_03.pdf", source_url, flags=re.IGNORECASE)
+        return None
+
+    @classmethod
+    def document_exists(cls, url: str) -> bool:
+        cached = cls._document_exists_cache.get(url)
+        if cached is not None:
+            return cached
+        try:
+            fetch_url(url, method="HEAD")
+            exists = True
+        except Exception:
+            exists = False
+        cls._document_exists_cache[url] = exists
+        return exists
 
     @classmethod
     def official_file_url(cls, path: str) -> str:
