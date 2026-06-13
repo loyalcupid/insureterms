@@ -221,6 +221,10 @@ def result_sort_key(item: dict[str, Any]) -> tuple[int, int, int, str]:
     )
 
 
+def expanded_limit(limit: int, minimum: int = 20, maximum: int = 40) -> int:
+    return min(max(limit, minimum), maximum)
+
+
 def finalize_results(results: list[dict[str, Any]], query: str, limit: int = 20) -> list[dict[str, Any]]:
     ranked = sorted(results, key=result_sort_key)
 
@@ -365,7 +369,7 @@ class KbAdapter:
         )
 
         enriched = []
-        for item in ranked[: max(limit * 4, 40)]:
+        for item in ranked[: expanded_limit(limit)]:
             docs = cls.fetch_detail(item["detailParams"])
             item["documents"] = docs
             item["saleStartDate"] = docs[0]["saleStartDate"] if docs else None
@@ -561,7 +565,7 @@ class HyundaiAdapter:
         ranked = sorted(aggregated, key=result_sort_key)
 
         enriched: list[dict[str, Any]] = []
-        for item in ranked[: max(limit * 4, 40)]:
+        for item in ranked[: expanded_limit(limit)]:
             documents = cls.fetch_documents(item["rawItem"], item["saleStartDate"], item["saleEndDate"])
             item["documents"] = documents
             enriched.append(item)
@@ -704,7 +708,7 @@ class MeritzAdapter:
 
         ranked = sorted(candidates, key=result_sort_key)
         enriched = []
-        for item in ranked[: max(limit * 4, 40)]:
+        for item in ranked[: expanded_limit(limit)]:
             item["documents"] = cls.fetch_documents(item["documentProductCode"])
             enriched.append(item)
         return sorted(enriched, key=result_sort_key)[:limit]
@@ -965,7 +969,7 @@ class LotteAdapter:
                 results.append(best_period)
             else:
                 results.append(item)
-            if len(results) >= limit * 3:
+            if len(results) >= expanded_limit(limit):
                 break
 
         ranked_candidates = sorted(
@@ -976,7 +980,7 @@ class LotteAdapter:
         return ranked_candidates[:limit]
 
         enriched_results = []
-        for item in ranked_candidates[: max(limit * 4, 8)]:
+        for item in ranked_candidates[: expanded_limit(limit)]:
             detail = cls.get_product_detail(item["productCode"])
             enriched = dict(item)
             enriched.update(detail)
@@ -996,7 +1000,7 @@ class LotteAdapter:
         )
 
         enriched_results = []
-        for item in ranked_candidates[: max(limit * 4, 8)]:
+        for item in ranked_candidates[: expanded_limit(limit)]:
             detail = cls.get_product_detail(item["productCode"])
             enriched = dict(item)
             enriched.update(detail)
@@ -1646,7 +1650,7 @@ class NhFireLiveAdapter:
         )
 
         enriched = []
-        for item in candidates[: max(limit * 4, 8)]:
+        for item in candidates[: expanded_limit(limit)]:
             detail = cls.fetch_detail(item["productCode"])
             merged = {**item, **detail}
             merged["score"] = score_text(
@@ -2675,7 +2679,7 @@ class HeungkukAdapter:
 
         ranked = sorted(unique_by(products, "productCode", "productName"), key=result_sort_key)
         enriched: list[dict[str, Any]] = []
-        for item in ranked[: max(limit * 4, 40)]:
+        for item in ranked[: expanded_limit(limit)]:
             detail = cls.fetch_detail(opener, csrf, item["productCode"])
             item["documents"] = cls.documents_from_detail(item["productCode"], detail)
             if detail.get("gubunCd"):
