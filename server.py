@@ -186,10 +186,27 @@ def product_name_matches_query(item: dict[str, Any], query: str) -> bool:
     return bool(query_tokens) and all(token in product_name for token in query_tokens)
 
 
+def recency_value(item: dict[str, Any]) -> int:
+    candidates = [item.get("updatedAt"), item.get("saleStartDate")]
+    candidates.extend(doc.get("revisionDate") or doc.get("saleStartDate") for doc in item.get("documents", []))
+    for value in candidates:
+        if not value:
+            continue
+        digits = re.sub(r"\D", "", str(value))[:8]
+        if digits:
+            return int(digits)
+    return 0
+
+
 def finalize_results(results: list[dict[str, Any]], query: str, limit: int = 20) -> list[dict[str, Any]]:
     ranked = sorted(
         results,
-        key=lambda item: (-item.get("score", 0), 0 if item.get("status") == "판매중" else 1, item.get("productName", "")),
+        key=lambda item: (
+            -recency_value(item),
+            -item.get("score", 0),
+            0 if item.get("status") == "판매중" else 1,
+            item.get("productName", ""),
+        ),
     )
 
     filtered: list[dict[str, Any]] = []

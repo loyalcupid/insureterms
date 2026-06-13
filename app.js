@@ -73,7 +73,7 @@ const state = {
   query: "",
   selectedCategory: null,
   selectedInsurer: null,
-  filters: { insurer: LABELS.all, docType: LABELS.all, status: LABELS.all, sort: "score" },
+  filters: { insurer: LABELS.all, docType: LABELS.all, status: LABELS.all, sort: "recent" },
   rawResults: [],
   results: [],
 };
@@ -318,6 +318,20 @@ function computeScore(product, queryTokens) {
   return queryTokens.reduce((score, token) => (haystack.includes(token) ? score + 4 : score), product.score ?? 0);
 }
 
+function getRecencyValue(item) {
+  const candidates = [
+    item.updatedAt,
+    item.saleStartDate,
+    ...(item.documents || []).map((doc) => doc.revisionDate || doc.saleStartDate || ""),
+  ];
+  for (const value of candidates) {
+    if (!value) continue;
+    const numeric = Number(String(value).replace(/\D/g, "").slice(0, 8));
+    if (numeric) return numeric;
+  }
+  return 0;
+}
+
 function applyFilters(items) {
   const insurerCards = items.filter((item) => item.resultType === "insurer");
   let filtered = items.filter((item) => item.resultType !== "insurer");
@@ -325,8 +339,21 @@ function applyFilters(items) {
   if (state.filters.insurer !== LABELS.all) filtered = filtered.filter((item) => item.insurerName === state.filters.insurer);
   if (state.filters.status !== LABELS.all) filtered = filtered.filter((item) => item.status === state.filters.status);
   if (state.filters.docType !== LABELS.all) filtered = filtered.filter((item) => (item.documents || []).some((doc) => doc.type === state.filters.docType));
-  if (state.filters.sort === "recent") filtered.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
-  else filtered.sort((a, b) => (b.score || 0) - (a.score || 0));
+  if (state.filters.sort === "recent") {
+    filtered.sort(
+      (a, b) =>
+        getRecencyValue(b) - getRecencyValue(a) ||
+        (b.score || 0) - (a.score || 0) ||
+        a.productName.localeCompare(b.productName)
+    );
+  } else {
+    filtered.sort(
+      (a, b) =>
+        (b.score || 0) - (a.score || 0) ||
+        getRecencyValue(b) - getRecencyValue(a) ||
+        a.productName.localeCompare(b.productName)
+    );
+  }
   return [...insurerCards, ...filtered];
 }
 
@@ -502,8 +529,9 @@ function bindEvents() {
       state.query = "";
       state.rawResults = [];
       state.results = [];
-      state.filters = { insurer: LABELS.all, docType: LABELS.all, status: LABELS.all, sort: "score" };
+      state.filters = { insurer: LABELS.all, docType: LABELS.all, status: LABELS.all, sort: "recent" };
       buildFilters();
+      elements.sortFilter.value = state.filters.sort;
       renderSelectedInsurer();
       renderResults();
       elements.input.value = "";
@@ -518,8 +546,9 @@ function bindEvents() {
       state.query = "";
       state.rawResults = [];
       state.results = [];
-      state.filters = { insurer: LABELS.all, docType: LABELS.all, status: LABELS.all, sort: "score" };
+      state.filters = { insurer: LABELS.all, docType: LABELS.all, status: LABELS.all, sort: "recent" };
       buildFilters();
+      elements.sortFilter.value = state.filters.sort;
       renderSelectedInsurer();
       renderResults();
       if (state.selectedInsurer?.searchEnabled) {
@@ -534,8 +563,9 @@ function bindEvents() {
       state.query = "";
       state.rawResults = [];
       state.results = [];
-      state.filters = { insurer: LABELS.all, docType: LABELS.all, status: LABELS.all, sort: "score" };
+      state.filters = { insurer: LABELS.all, docType: LABELS.all, status: LABELS.all, sort: "recent" };
       buildFilters();
+      elements.sortFilter.value = state.filters.sort;
       renderSelectedInsurer();
       renderResults();
       elements.input.value = "";
@@ -569,6 +599,7 @@ function init() {
   fillSelect(elements.insurerFilter, [LABELS.all]);
   fillSelect(elements.docTypeFilter, [LABELS.all]);
   fillSelect(elements.statusFilter, [LABELS.all]);
+  elements.sortFilter.value = state.filters.sort;
   renderSelectedInsurer();
   renderResults();
   bindEvents();
