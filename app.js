@@ -418,7 +418,6 @@ function renderResults() {
               <p class="meta-line">\uAC1C\uC815\uC77C ${doc.revisionDate || "-"} · \uACF5\uC2DD\uCD9C\uCC98 ${item.officialSource}</p>
               <div class="action-row">
                 <a class="download-link" href="${doc.url}" target="_blank" rel="noreferrer">\uB2E4\uC6B4\uB85C\uB4DC</a>
-                <a class="doc-link" href="${item.sourceUrl}" target="_blank" rel="noreferrer">\uC6D0\uBB38 \uBCF4\uAE30</a>
               </div>
             </article>
           `

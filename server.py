@@ -186,6 +186,17 @@ def product_name_matches_query(item: dict[str, Any], query: str) -> bool:
     return bool(query_tokens) and all(token in product_name for token in query_tokens)
 
 
+def name_recency_value(text: str | None) -> int:
+    value = str(text or "")
+    match = re.search(r"\((20\d{2})[.\-/](\d{2})\)", value)
+    if match:
+        return int(f"{match.group(1)}{match.group(2)}01")
+    match = re.search(r"\((\d{2})[.\-/](\d{2})\)", value)
+    if match:
+        return int(f"20{match.group(1)}{match.group(2)}01")
+    return 0
+
+
 def recency_value(item: dict[str, Any]) -> int:
     candidates = [item.get("updatedAt"), item.get("saleStartDate")]
     candidates.extend(doc.get("revisionDate") or doc.get("saleStartDate") for doc in item.get("documents", []))
@@ -195,19 +206,23 @@ def recency_value(item: dict[str, Any]) -> int:
         digits = re.sub(r"\D", "", str(value))[:8]
         if digits:
             return int(digits)
+    fallback = name_recency_value(item.get("productName", ""))
+    if fallback:
+        return fallback
     return 0
 
 
-def finalize_results(results: list[dict[str, Any]], query: str, limit: int = 20) -> list[dict[str, Any]]:
-    ranked = sorted(
-        results,
-        key=lambda item: (
-            -recency_value(item),
-            -item.get("score", 0),
-            0 if item.get("status") == "판매중" else 1,
-            item.get("productName", ""),
-        ),
+def result_sort_key(item: dict[str, Any]) -> tuple[int, int, int, str]:
+    return (
+        -recency_value(item),
+        -item.get("score", 0),
+        0 if item.get("status") == "판매중" else 1,
+        item.get("productName", ""),
     )
+
+
+def finalize_results(results: list[dict[str, Any]], query: str, limit: int = 20) -> list[dict[str, Any]]:
+    ranked = sorted(results, key=result_sort_key)
 
     filtered: list[dict[str, Any]] = []
     for item in ranked:
@@ -341,11 +356,16 @@ class KbAdapter:
 
         ranked = sorted(
             unique_by(aggregated, "productCode", "productName"),
-            key=lambda item: (-score_text(query, item["productName"], item["insuranceType"], item["productCode"]), item["productName"]),
+            key=lambda item: result_sort_key(
+                {
+                    **item,
+                    "score": score_text(query, item["productName"], item["insuranceType"], item["productCode"]),
+                }
+            ),
         )
 
         enriched = []
-        for item in ranked[:limit]:
+        for item in ranked[: max(limit * 4, 40)]:
             docs = cls.fetch_detail(item["detailParams"])
             item["documents"] = docs
             item["saleStartDate"] = docs[0]["saleStartDate"] if docs else None
@@ -354,7 +374,7 @@ class KbAdapter:
             item["officialSource"] = "KB손해보험 상품목록(약관)"
             item["score"] = score_text(query, item["productName"], item["insuranceType"], item["productCode"])
             enriched.append(item)
-        return enriched
+        return sorted(enriched, key=result_sort_key)[:limit]
 
     @classmethod
     def search_once(cls, query: str, target_row: int = 1) -> list[dict[str, Any]]:
@@ -538,21 +558,14 @@ class HyundaiAdapter:
             if item["score"] > 0:
                 aggregated.append(item)
 
-        ranked = sorted(
-            aggregated,
-            key=lambda item: (
-                -item["score"],
-                0 if item.get("status") == "판매중" else 1,
-                item["productName"],
-            ),
-        )
+        ranked = sorted(aggregated, key=result_sort_key)
 
         enriched: list[dict[str, Any]] = []
-        for item in ranked[:limit]:
+        for item in ranked[: max(limit * 4, 40)]:
             documents = cls.fetch_documents(item["rawItem"], item["saleStartDate"], item["saleEndDate"])
             item["documents"] = documents
             enriched.append(item)
-        return enriched
+        return sorted(enriched, key=result_sort_key)[:limit]
 
     @classmethod
     def fetch_catalog(cls) -> list[dict[str, Any]]:
@@ -689,12 +702,12 @@ class MeritzAdapter:
             item["score"] = score
             candidates.append(item)
 
-        ranked = sorted(candidates, key=lambda item: (-item["score"], item["productName"]))
+        ranked = sorted(candidates, key=result_sort_key)
         enriched = []
-        for item in ranked[:limit]:
+        for item in ranked[: max(limit * 4, 40)]:
             item["documents"] = cls.fetch_documents(item["documentProductCode"])
             enriched.append(item)
-        return enriched
+        return sorted(enriched, key=result_sort_key)[:limit]
 
     @classmethod
     def fetch_products(cls) -> list[dict[str, Any]]:
@@ -2660,15 +2673,15 @@ class HeungkukAdapter:
                     }
                 )
 
-        ranked = sorted(unique_by(products, "productCode", "productName"), key=lambda item: (-item["score"], item["productName"]))
+        ranked = sorted(unique_by(products, "productCode", "productName"), key=result_sort_key)
         enriched: list[dict[str, Any]] = []
-        for item in ranked[:limit]:
+        for item in ranked[: max(limit * 4, 40)]:
             detail = cls.fetch_detail(opener, csrf, item["productCode"])
             item["documents"] = cls.documents_from_detail(item["productCode"], detail)
             if detail.get("gubunCd"):
                 item["insuranceType"] = cls.CATEGORIES.get(detail.get("gubunCd"), item["insuranceType"])
             enriched.append(item)
-        return enriched
+        return sorted(enriched, key=result_sort_key)[:limit]
 
     @classmethod
     def fetch_detail(cls, opener: urllib.request.OpenerDirector, csrf: str, seq: str) -> dict[str, Any]:
