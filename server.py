@@ -9,6 +9,7 @@ import mimetypes
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -225,6 +226,10 @@ def expanded_limit(limit: int, minimum: int = 20, maximum: int = 40) -> int:
     return min(max(limit, minimum), maximum)
 
 
+def is_terms_doc(doc_type: str | None) -> bool:
+    return (doc_type or "").strip() == "보험약관"
+
+
 def finalize_results(results: list[dict[str, Any]], query: str, limit: int = 20) -> list[dict[str, Any]]:
     ranked = sorted(results, key=result_sort_key)
 
@@ -339,6 +344,7 @@ class KbAdapter:
     search_url = f"{base}/CG802030001.ecs"
     detail_url = f"{base}/CG802030002.ec"
     page_size = 10
+    SEARCH_WORKERS = 2
 
     @classmethod
     def search(cls, query: str, limit: int = 20) -> list[dict[str, Any]]:
@@ -368,17 +374,25 @@ class KbAdapter:
             ),
         )
 
-        enriched = []
-        for item in ranked[: expanded_limit(limit)]:
-            docs = cls.fetch_detail(item["detailParams"])
-            item["documents"] = docs
-            item["saleStartDate"] = docs[0]["saleStartDate"] if docs else None
-            item["saleEndDate"] = docs[-1]["saleEndDate"] if docs else None
-            item["updatedAt"] = docs[-1]["saleStartDate"] if docs else None
-            item["officialSource"] = "KB손해보험 상품목록(약관)"
-            item["score"] = score_text(query, item["productName"], item["insuranceType"], item["productCode"])
-            enriched.append(item)
+        candidates = ranked[: expanded_limit(limit)]
+        with ThreadPoolExecutor(max_workers=min(cls.SEARCH_WORKERS, max(len(candidates), 1))) as executor:
+            enriched = list(executor.map(lambda item: cls.enrich_search_item(item, query), candidates))
         return sorted(enriched, key=result_sort_key)[:limit]
+
+    @classmethod
+    def enrich_search_item(cls, item: dict[str, Any], query: str) -> dict[str, Any]:
+        enriched = dict(item)
+        try:
+            docs = cls.fetch_detail(enriched["detailParams"], terms_only=True)
+        except Exception:
+            docs = []
+        enriched["documents"] = docs
+        enriched["saleStartDate"] = docs[0]["saleStartDate"] if docs else None
+        enriched["saleEndDate"] = docs[-1]["saleEndDate"] if docs else None
+        enriched["updatedAt"] = docs[-1]["saleStartDate"] if docs else None
+        enriched["officialSource"] = "KB손해보험 상품목록(약관)"
+        enriched["score"] = score_text(query, enriched["productName"], enriched["insuranceType"], enriched["productCode"])
+        return enriched
 
     @classmethod
     def search_once(cls, query: str, target_row: int = 1) -> list[dict[str, Any]]:
@@ -426,7 +440,7 @@ class KbAdapter:
         return results
 
     @classmethod
-    def fetch_detail(cls, detail_params: dict[str, str]) -> list[dict[str, Any]]:
+    def fetch_detail(cls, detail_params: dict[str, str], terms_only: bool = False) -> list[dict[str, Any]]:
         body = urllib.parse.urlencode(detail_params, encoding="euc-kr").encode("ascii")
         html = fetch_text(
             cls.detail_url,
@@ -446,6 +460,8 @@ class KbAdapter:
                 ("사업방법서", extract_href(biz_html)),
                 ("상품요약서", extract_href(summary_html)),
             ]:
+                if terms_only and not is_terms_doc(doc_type):
+                    continue
                 if not href:
                     continue
                 docs.append(
@@ -546,6 +562,7 @@ class HyundaiAdapter:
     base = "https://children.hi.co.kr"
     page_url = f"{base}/bin/CI/ON/CION3200G.jsp"
     ajax_url = f"{base}/ajax.xhi"
+    SEARCH_WORKERS = 2
 
     DOC_TYPES = [
         ("clauApnflId", "보험약관"),
@@ -564,12 +581,24 @@ class HyundaiAdapter:
 
         ranked = sorted(aggregated, key=result_sort_key)
 
-        enriched: list[dict[str, Any]] = []
-        for item in ranked[: expanded_limit(limit)]:
-            documents = cls.fetch_documents(item["rawItem"], item["saleStartDate"], item["saleEndDate"])
-            item["documents"] = documents
-            enriched.append(item)
+        candidates = ranked[: expanded_limit(limit)]
+        with ThreadPoolExecutor(max_workers=min(cls.SEARCH_WORKERS, max(len(candidates), 1))) as executor:
+            enriched = list(executor.map(cls.enrich_search_item, candidates))
         return sorted(enriched, key=result_sort_key)[:limit]
+
+    @classmethod
+    def enrich_search_item(cls, item: dict[str, Any]) -> dict[str, Any]:
+        enriched = dict(item)
+        try:
+            enriched["documents"] = cls.fetch_documents(
+                enriched["rawItem"],
+                enriched["saleStartDate"],
+                enriched["saleEndDate"],
+                terms_only=True,
+            )
+        except Exception:
+            enriched["documents"] = []
+        return enriched
 
     @classmethod
     def fetch_catalog(cls) -> list[dict[str, Any]]:
@@ -603,9 +632,11 @@ class HyundaiAdapter:
         return results
 
     @classmethod
-    def fetch_documents(cls, item: dict[str, Any], sale_start: str | None, sale_end: str | None) -> list[dict[str, Any]]:
+    def fetch_documents(cls, item: dict[str, Any], sale_start: str | None, sale_end: str | None, terms_only: bool = False) -> list[dict[str, Any]]:
         documents: list[dict[str, Any]] = []
         for field_name, doc_type in cls.DOC_TYPES:
+            if terms_only and not is_terms_doc(doc_type):
+                continue
             apnfl_id = item.get(field_name)
             if not apnfl_id:
                 continue
@@ -709,7 +740,7 @@ class MeritzAdapter:
         ranked = sorted(candidates, key=result_sort_key)
         enriched = []
         for item in ranked[: expanded_limit(limit)]:
-            item["documents"] = cls.fetch_documents(item["documentProductCode"])
+            item["documents"] = cls.fetch_documents(item["documentProductCode"], terms_only=True)
             enriched.append(item)
         return sorted(enriched, key=result_sort_key)[:limit]
 
@@ -753,12 +784,14 @@ class MeritzAdapter:
         return json.loads(raw).get("list", [])
 
     @classmethod
-    def fetch_documents(cls, product_code: str) -> list[dict[str, Any]]:
+    def fetch_documents(cls, product_code: str, terms_only: bool = False) -> list[dict[str, Any]]:
         payload = cls.make_request("f.cg.he.ct.tm.o.bc.CtrCnfBc.retrievePdfFileLst", {"pdCd": product_code})
         response = cls.fetch_json(cls.json_url, payload)
         documents = []
         for item in response.get("body", {}).get("pdfList", []):
             doc_type = cls.DOC_TYPE_BY_CODE.get(item.get("cmAtcFileCtgCd"), "문서")
+            if terms_only and not is_terms_doc(doc_type):
+                continue
             encrypted_path = item.get("atcFilePthNm#[E]") or item.get("atcFilePthNm")
             original_name = item.get("ortxtFileNm") or item.get("atcFileNm") or f"{doc_type}.pdf"
             if not encrypted_path:
@@ -956,7 +989,7 @@ class LotteAdapter:
 
         results: list[dict[str, Any]] = []
         for item in ranked:
-            period_results = cls.fetch_period_results(item)
+            period_results = cls.fetch_period_results(item, terms_only=True)
             if period_results:
                 best_period = sorted(
                     period_results,
@@ -1093,7 +1126,7 @@ class LotteAdapter:
         return products
 
     @classmethod
-    def fetch_period_results(cls, product: dict[str, Any]) -> list[dict[str, Any]]:
+    def fetch_period_results(cls, product: dict[str, Any], terms_only: bool = False) -> list[dict[str, Any]]:
         task = "gostep3issale" if product.get("isSale") else "gostep3isnotsale"
         html = cls.post_form(
             {
@@ -1114,7 +1147,7 @@ class LotteAdapter:
         )
         results = []
         for lcode, mcode, scode, startdate, sale_period in periods:
-            details = cls.fetch_documents(lcode, mcode, scode, startdate, product.get("isSale", False))
+            details = cls.fetch_documents(lcode, mcode, scode, startdate, product.get("isSale", False), terms_only=terms_only)
             if not details:
                 continue
             period_result = dict(product)
@@ -1127,7 +1160,7 @@ class LotteAdapter:
         return results
 
     @classmethod
-    def fetch_documents(cls, lcode: str, mcode: str, scode: str, startdate: str, is_sale: bool) -> dict[str, Any] | None:
+    def fetch_documents(cls, lcode: str, mcode: str, scode: str, startdate: str, is_sale: bool, terms_only: bool = False) -> dict[str, Any] | None:
         task = "gostep4issale" if is_sale else "gostep4isnotsale"
         html = cls.post_form(
             {
@@ -1152,6 +1185,8 @@ class LotteAdapter:
         documents = []
         for href, raw_type in links:
             doc_type = cls.normalize_doc_type(raw_type)
+            if terms_only and not is_terms_doc(doc_type):
+                continue
             documents.append(
                 {
                     "type": doc_type,
@@ -1651,7 +1686,7 @@ class NhFireLiveAdapter:
 
         enriched = []
         for item in candidates[: expanded_limit(limit)]:
-            detail = cls.fetch_detail(item["productCode"])
+            detail = cls.fetch_detail(item["productCode"], terms_only=True)
             merged = {**item, **detail}
             merged["score"] = score_text(
                 query,
@@ -1797,7 +1832,7 @@ class NhFireLiveAdapter:
         return current
 
     @classmethod
-    def fetch_detail(cls, product_code: str) -> dict[str, Any]:
+    def fetch_detail(cls, product_code: str, terms_only: bool = False) -> dict[str, Any]:
         cached = cls._detail_cache.get(product_code)
         now = time.time()
         if cached and now - cached[0] < cls.CACHE_SECONDS:
@@ -1806,7 +1841,7 @@ class NhFireLiveAdapter:
         html = fetch_text(cls.detail_page_url(product_code), encoding="utf-8")
         keywords_match = re.search(r'<ul class="bar_area">\s*<li>\s*(.*?)\s*</li>', html, re.S)
         keywords = clean_html(keywords_match.group(1)) if keywords_match else ""
-        disclosure = cls.fetch_disclosure(product_code)
+        disclosure = cls.fetch_disclosure(product_code, terms_only=terms_only)
         detail = {
             "documents": disclosure["documents"],
             "saleStartDate": disclosure["saleStartDate"],
@@ -1815,14 +1850,14 @@ class NhFireLiveAdapter:
             "keywords": keywords,
         }
         if not detail["documents"]:
-            detail["documents"] = cls.parse_detail_terms(product_code, html)
+            detail["documents"] = cls.parse_detail_terms(product_code, html, terms_only=terms_only)
             if detail["documents"] and not detail["updatedAt"]:
                 detail["updatedAt"] = detail["documents"][0].get("revisionDate")
         cls._detail_cache[product_code] = (now, detail)
         return dict(detail)
 
     @classmethod
-    def fetch_disclosure(cls, product_code: str) -> dict[str, Any]:
+    def fetch_disclosure(cls, product_code: str, terms_only: bool = False) -> dict[str, Any]:
         jar = http.cookiejar.CookieJar()
         opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
         opener.open(urllib.request.Request(cls.source_url, headers={"User-Agent": USER_AGENT}), timeout=30).read()
@@ -1837,7 +1872,7 @@ class NhFireLiveAdapter:
         if not row:
             return {"documents": [], "saleStartDate": None, "saleEndDate": None, "updatedAt": None}
         return {
-            "documents": cls.documents_from_row(product_code, row),
+            "documents": cls.documents_from_row(product_code, row, terms_only=terms_only),
             "saleStartDate": clean_date(row.get("pdtSelStDt")),
             "saleEndDate": clean_date(row.get("pdtSelEdDt")),
             "updatedAt": clean_date(row.get("pdtSelStDt")),
@@ -1866,7 +1901,7 @@ class NhFireLiveAdapter:
         return sorted(rows, key=row_key)[0]
 
     @classmethod
-    def documents_from_row(cls, product_code: str, row: dict[str, str]) -> list[dict[str, Any]]:
+    def documents_from_row(cls, product_code: str, row: dict[str, str], terms_only: bool = False) -> list[dict[str, Any]]:
         file_id = (row.get("fileId") or "").strip()
         revision_date = clean_date(row.get("pdtSelStDt"))
         mappings = [
@@ -1876,6 +1911,8 @@ class NhFireLiveAdapter:
         ]
         documents = []
         for seq_key, name_key, doc_type in mappings:
+            if terms_only and not is_terms_doc(doc_type):
+                continue
             seq = (row.get(seq_key) or "").strip()
             filename = (row.get(name_key) or "").strip()
             if not file_id or not seq or not filename:
@@ -1898,12 +1935,15 @@ class NhFireLiveAdapter:
         return documents
 
     @classmethod
-    def parse_detail_terms(cls, product_code: str, html: str) -> list[dict[str, Any]]:
+    def parse_detail_terms(cls, product_code: str, html: str, terms_only: bool = False) -> list[dict[str, Any]]:
         documents = []
         seen: set[tuple[str, str]] = set()
         for file_id, seq, filename in re.findall(r"fnPdtFileDownload\('([^']+)',\s*'([^']+)',\s*'([^']*)'\)", html):
             filename = filename.strip()
             if not filename:
+                continue
+            doc_type = "보험약관"
+            if terms_only and not is_terms_doc(doc_type):
                 continue
             signature = (file_id, seq)
             if signature in seen:
@@ -2541,7 +2581,7 @@ class HanwhaFireAdapter:
         revision_date = cls.extract_revision(filename) or cls.extract_revision(product_name)
         return [
             {
-                "type": "보험약관",
+                    "type": "보험약관",
                 "title": filename or f"{product_name} 약관.pdf",
                 "url": cls.official_file_url(str(document_path)),
                 "revisionDate": revision_date,
@@ -2681,7 +2721,7 @@ class HeungkukAdapter:
         enriched: list[dict[str, Any]] = []
         for item in ranked[: expanded_limit(limit)]:
             detail = cls.fetch_detail(opener, csrf, item["productCode"])
-            item["documents"] = cls.documents_from_detail(item["productCode"], detail)
+            item["documents"] = cls.documents_from_detail(item["productCode"], detail, terms_only=True)
             if detail.get("gubunCd"):
                 item["insuranceType"] = cls.CATEGORIES.get(detail.get("gubunCd"), item["insuranceType"])
             enriched.append(item)
@@ -2699,12 +2739,14 @@ class HeungkukAdapter:
         return response.get("result", {}) or {}
 
     @classmethod
-    def documents_from_detail(cls, seq: str, detail: dict[str, Any]) -> list[dict[str, Any]]:
+    def documents_from_detail(cls, seq: str, detail: dict[str, Any], terms_only: bool = False) -> list[dict[str, Any]]:
         documents: list[dict[str, Any]] = []
         for doc_key, doc_type, label in [
             ("terms", "보험약관", "약관 다운로드"),
             ("advice", "상품안내장", "안내장 다운로드"),
         ]:
+            if terms_only and not is_terms_doc(doc_type):
+                continue
             prefix = "terms" if doc_key == "terms" else "advice"
             saved_name = detail.get(f"{prefix}FileNm")
             original_name = detail.get(f"{prefix}FileOrgNm")
