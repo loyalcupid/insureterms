@@ -73,7 +73,6 @@ const state = {
   query: "",
   selectedCategory: null,
   selectedInsurer: null,
-  filters: { insurer: LABELS.all, docType: LABELS.all, status: LABELS.all, sort: "recent" },
   rawResults: [],
   results: [],
 };
@@ -93,10 +92,6 @@ const elements = {
   insurerButtons: document.getElementById("insurer-buttons"),
   productSearchArea: document.getElementById("product-search-area"),
   lifeInsurerNotice: document.getElementById("life-insurer-notice"),
-  insurerFilter: document.getElementById("insurer-filter"),
-  docTypeFilter: document.getElementById("doc-type-filter"),
-  statusFilter: document.getElementById("status-filter"),
-  sortFilter: document.getElementById("sort-filter"),
   adminGrid: document.getElementById("admin-grid"),
   selectedInsurer: document.getElementById("selected-insurer"),
 };
@@ -117,10 +112,6 @@ function getStatusClass(status) {
   if (status === "\uD310\uB9E4\uC911\uC9C0") return "status-stopped";
   if (status === "\uACFC\uAC70\uC0C1\uD488") return "status-legacy";
   return "";
-}
-
-function fillSelect(select, values) {
-  select.innerHTML = values.map((value) => `<option value="${value}">${value}</option>`).join("");
 }
 
 function renderSuggestedKeywords() {
@@ -302,13 +293,6 @@ function toViewModel(result, index) {
   };
 }
 
-function buildFilters() {
-  const productResults = state.rawResults.filter((item) => item.resultType !== "insurer");
-  fillSelect(elements.insurerFilter, [LABELS.all, ...new Set(productResults.map((item) => item.insurerName).filter(Boolean))]);
-  fillSelect(elements.docTypeFilter, [LABELS.all, ...new Set(productResults.flatMap((item) => (item.documents || []).map((doc) => doc.type)).filter(Boolean))]);
-  fillSelect(elements.statusFilter, [LABELS.all, ...new Set(productResults.map((item) => item.status).filter(Boolean))]);
-}
-
 function computeScore(product, queryTokens) {
   if (product.resultType === "insurer") return product.score || 0;
   if (!queryTokens.length) return product.score ?? 0;
@@ -332,28 +316,16 @@ function getRecencyValue(item) {
   return 0;
 }
 
-function applyFilters(items) {
+function sortResults(items) {
   const insurerCards = items.filter((item) => item.resultType === "insurer");
   let filtered = items.filter((item) => item.resultType !== "insurer");
   if (state.selectedInsurer) filtered = filtered.filter((item) => item.provider === state.selectedInsurer.key);
-  if (state.filters.insurer !== LABELS.all) filtered = filtered.filter((item) => item.insurerName === state.filters.insurer);
-  if (state.filters.status !== LABELS.all) filtered = filtered.filter((item) => item.status === state.filters.status);
-  if (state.filters.docType !== LABELS.all) filtered = filtered.filter((item) => (item.documents || []).some((doc) => doc.type === state.filters.docType));
-  if (state.filters.sort === "recent") {
-    filtered.sort(
-      (a, b) =>
-        getRecencyValue(b) - getRecencyValue(a) ||
-        (b.score || 0) - (a.score || 0) ||
-        a.productName.localeCompare(b.productName)
-    );
-  } else {
-    filtered.sort(
-      (a, b) =>
-        (b.score || 0) - (a.score || 0) ||
-        getRecencyValue(b) - getRecencyValue(a) ||
-        a.productName.localeCompare(b.productName)
-    );
-  }
+  filtered.sort(
+    (a, b) =>
+      getRecencyValue(b) - getRecencyValue(a) ||
+      (b.score || 0) - (a.score || 0) ||
+      a.productName.localeCompare(b.productName)
+  );
   return [...insurerCards, ...filtered];
 }
 
@@ -367,7 +339,7 @@ async function fetchSearchResults(query, insurerKey = null) {
 
 function searchProducts(query) {
   const queryTokens = tokenize(query);
-  state.results = applyFilters(state.rawResults.map((item) => ({ ...item, score: computeScore(item, queryTokens) })));
+  state.results = sortResults(state.rawResults.map((item) => ({ ...item, score: computeScore(item, queryTokens) })));
   renderResults();
 }
 
@@ -446,7 +418,6 @@ async function handleSearch(query) {
   if (!state.query) {
     state.rawResults = [];
     state.results = [];
-    buildFilters();
     renderSelectedInsurer();
     renderResults();
     return;
@@ -456,21 +427,18 @@ async function handleSearch(query) {
   if (!state.selectedInsurer) {
     state.rawResults = [];
     state.results = [];
-    buildFilters();
     renderResults();
     return;
   }
   if (!state.selectedInsurer.searchEnabled) {
     state.rawResults = [];
     state.results = [];
-    buildFilters();
     renderResults();
     return;
   }
   const insurerOnly = isInsurerOnlyQuery(state.query);
   if (insurerOnly) {
     state.rawResults = findMatchingInsurers(state.query).map(toInsurerResult);
-    buildFilters();
     searchProducts(state.query);
     return;
   }
@@ -483,7 +451,6 @@ async function handleSearch(query) {
   } catch (error) {
     state.rawResults = [];
   }
-  buildFilters();
   searchProducts(state.query);
 }
 
@@ -528,9 +495,6 @@ function bindEvents() {
       state.query = "";
       state.rawResults = [];
       state.results = [];
-      state.filters = { insurer: LABELS.all, docType: LABELS.all, status: LABELS.all, sort: "recent" };
-      buildFilters();
-      elements.sortFilter.value = state.filters.sort;
       renderSelectedInsurer();
       renderResults();
       elements.input.value = "";
@@ -545,9 +509,6 @@ function bindEvents() {
       state.query = "";
       state.rawResults = [];
       state.results = [];
-      state.filters = { insurer: LABELS.all, docType: LABELS.all, status: LABELS.all, sort: "recent" };
-      buildFilters();
-      elements.sortFilter.value = state.filters.sort;
       renderSelectedInsurer();
       renderResults();
       if (state.selectedInsurer?.searchEnabled) {
@@ -562,25 +523,10 @@ function bindEvents() {
       state.query = "";
       state.rawResults = [];
       state.results = [];
-      state.filters = { insurer: LABELS.all, docType: LABELS.all, status: LABELS.all, sort: "recent" };
-      buildFilters();
-      elements.sortFilter.value = state.filters.sort;
       renderSelectedInsurer();
       renderResults();
       elements.input.value = "";
     }
-  });
-
-  [elements.insurerFilter, elements.docTypeFilter, elements.statusFilter, elements.sortFilter].forEach((select) => {
-    select.addEventListener("change", () => {
-      state.filters = {
-        insurer: elements.insurerFilter.value,
-        docType: elements.docTypeFilter.value,
-        status: elements.statusFilter.value,
-        sort: elements.sortFilter.value,
-      };
-      searchProducts(state.query);
-    });
   });
 
   if (elements.retrySimilar && elements.emptySuggestions) {
@@ -595,10 +541,6 @@ function init() {
   renderInsurerCategoryButtons();
   renderInsurerButtons();
   renderAdmin();
-  fillSelect(elements.insurerFilter, [LABELS.all]);
-  fillSelect(elements.docTypeFilter, [LABELS.all]);
-  fillSelect(elements.statusFilter, [LABELS.all]);
-  elements.sortFilter.value = state.filters.sort;
   renderSelectedInsurer();
   renderResults();
   bindEvents();

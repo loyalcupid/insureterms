@@ -382,19 +382,6 @@ button:hover,
   font-weight: 600;
 }
 
-.filters {
-  margin-top: 18px;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.filters label {
-  display: grid;
-  gap: 8px;
-  font-weight: 700;
-}
-
 .results-grid,
 .detail-docs,
 .detail-meta,
@@ -546,7 +533,6 @@ button:hover,
 @media (max-width: 920px) {
   .hero-grid,
   .results-grid,
-  .filters,
   .admin-grid,
   .stat-grid,
   .insurer-category-grid,
