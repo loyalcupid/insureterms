@@ -367,7 +367,7 @@ function renderResults() {
           <span></span>
           <span></span>
         </div>
-        <p class="meta-line loading-text">보험약관을 찾는 중입니다. 잠시만 기다려주세요</p>
+        <p class="meta-line loading-text">열심히 찾고 있어요</p>
       </article>
     `;
     return;
