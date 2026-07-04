@@ -76,6 +76,7 @@ const state = {
   rawResults: [],
   results: [],
   hasSearched: false,
+  isSearching: false,
 };
 
 const elements = {
@@ -347,13 +348,30 @@ function searchProducts(query) {
 
 function renderResults() {
   const hasResults = state.results.length > 0;
+  const showResultsSection = state.hasSearched || state.isSearching;
   const showEmptyState = state.hasSearched && !hasResults;
   const displayQuery = [state.selectedInsurer?.name, state.query].filter(Boolean).join(" ");
-  elements.resultsSection.classList.toggle("hidden", !state.hasSearched);
+  elements.resultsSection.classList.toggle("hidden", !showResultsSection);
   elements.queryDisplay.textContent = displayQuery ? LABELS.searched(displayQuery) : LABELS.searching;
   elements.resultCount.textContent = `${state.results.length}\uAC74`;
   elements.resultsTitle.textContent = hasResults ? LABELS.resultTitle : LABELS.noResultTitle;
-  elements.emptyState.classList.toggle("hidden", !showEmptyState);
+  elements.emptyState.classList.toggle("hidden", !showEmptyState || state.isSearching);
+  if (state.isSearching) {
+    elements.resultsTitle.textContent = "보험약관을 찾는 중입니다. 잠시만 기다려주세요";
+    elements.queryDisplay.textContent = "공식 공시실을 조회하는 중입니다";
+    elements.resultCount.textContent = "";
+    elements.resultsContainer.innerHTML = `
+      <article class="result-card loading-card">
+        <div class="loading-indicator" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <p class="meta-line loading-text">보험약관을 찾는 중입니다. 잠시만 기다려주세요</p>
+      </article>
+    `;
+    return;
+  }
   if (!hasResults) {
     elements.resultsContainer.innerHTML = "";
     if (elements.emptySuggestions) {
@@ -420,6 +438,7 @@ function renderResults() {
 async function handleSearch(query) {
   state.query = query.trim();
   state.hasSearched = Boolean(state.query);
+  state.isSearching = false;
   if (!state.query) {
     state.rawResults = [];
     state.results = [];
@@ -448,13 +467,17 @@ async function handleSearch(query) {
     return;
   }
 
-  elements.queryDisplay.textContent = "\uACF5\uC2DD \uACF5\uC2DC\uC2E4\uC744 \uC870\uD68C\uD558\uB294 \uC911\uC785\uB2C8\uB2E4";
-  elements.resultsTitle.textContent = "\uBCF4\uD5D8\uC0AC \uACF5\uC2DD \uBB38\uC11C\uB97C \uC870\uD68C\uD558\uB294 \uC911\uC785\uB2C8\uB2E4";
+  state.isSearching = true;
+  state.rawResults = [];
+  state.results = [];
+  renderResults();
   try {
     const payload = await fetchSearchResults(state.query, state.selectedInsurer?.key || null);
     state.rawResults = (payload.results || []).map(toViewModel);
   } catch (error) {
     state.rawResults = [];
+  } finally {
+    state.isSearching = false;
   }
   searchProducts(state.query);
 }
@@ -501,6 +524,7 @@ function bindEvents() {
       state.rawResults = [];
       state.results = [];
       state.hasSearched = false;
+      state.isSearching = false;
       renderSelectedInsurer();
       renderResults();
       elements.input.value = "";
@@ -516,6 +540,7 @@ function bindEvents() {
       state.rawResults = [];
       state.results = [];
       state.hasSearched = false;
+      state.isSearching = false;
       renderSelectedInsurer();
       renderResults();
       if (state.selectedInsurer?.searchEnabled) {
@@ -531,6 +556,7 @@ function bindEvents() {
       state.rawResults = [];
       state.results = [];
       state.hasSearched = false;
+      state.isSearching = false;
       renderSelectedInsurer();
       renderResults();
       elements.input.value = "";
