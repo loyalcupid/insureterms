@@ -527,6 +527,17 @@ button:hover,
   color: rgba(255, 247, 235, 0.84);
 }
 
+.site-footer {
+  padding: 20px 0 8px;
+  text-align: center;
+}
+
+.site-footer p {
+  color: rgba(38, 25, 13, 0.62);
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
 .hidden {
   display: none;
 }
