@@ -523,6 +523,7 @@ button:hover,
 }
 
 .footer-note p {
+  font-size: 0.5rem;
   color: rgba(255, 247, 235, 0.84);
 }
 

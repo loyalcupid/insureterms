@@ -75,11 +75,13 @@ const state = {
   selectedInsurer: null,
   rawResults: [],
   results: [],
+  hasSearched: false,
 };
 
 const elements = {
   form: document.getElementById("search-form"),
   input: document.getElementById("search-input"),
+  resultsSection: document.getElementById("results-section"),
   resultsContainer: document.getElementById("results-container"),
   resultsTitle: document.getElementById("results-title"),
   resultCount: document.getElementById("result-count"),
@@ -345,11 +347,13 @@ function searchProducts(query) {
 
 function renderResults() {
   const hasResults = state.results.length > 0;
+  const showEmptyState = state.hasSearched && !hasResults;
   const displayQuery = [state.selectedInsurer?.name, state.query].filter(Boolean).join(" ");
+  elements.resultsSection.classList.toggle("hidden", !state.hasSearched);
   elements.queryDisplay.textContent = displayQuery ? LABELS.searched(displayQuery) : LABELS.searching;
   elements.resultCount.textContent = `${state.results.length}\uAC74`;
   elements.resultsTitle.textContent = hasResults ? LABELS.resultTitle : LABELS.noResultTitle;
-  elements.emptyState.classList.toggle("hidden", hasResults);
+  elements.emptyState.classList.toggle("hidden", !showEmptyState);
   if (!hasResults) {
     elements.resultsContainer.innerHTML = "";
     if (elements.emptySuggestions) {
@@ -415,6 +419,7 @@ function renderResults() {
 
 async function handleSearch(query) {
   state.query = query.trim();
+  state.hasSearched = Boolean(state.query);
   if (!state.query) {
     state.rawResults = [];
     state.results = [];
@@ -495,6 +500,7 @@ function bindEvents() {
       state.query = "";
       state.rawResults = [];
       state.results = [];
+      state.hasSearched = false;
       renderSelectedInsurer();
       renderResults();
       elements.input.value = "";
@@ -509,6 +515,7 @@ function bindEvents() {
       state.query = "";
       state.rawResults = [];
       state.results = [];
+      state.hasSearched = false;
       renderSelectedInsurer();
       renderResults();
       if (state.selectedInsurer?.searchEnabled) {
@@ -523,6 +530,7 @@ function bindEvents() {
       state.query = "";
       state.rawResults = [];
       state.results = [];
+      state.hasSearched = false;
       renderSelectedInsurer();
       renderResults();
       elements.input.value = "";
