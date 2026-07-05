@@ -241,6 +241,10 @@ h3 {
   font-weight: 800;
 }
 
+.insurer-category-button span {
+  color: #2563eb;
+}
+
 .insurer-category-button small,
 .insurer-button small {
   color: var(--muted);
@@ -261,6 +265,11 @@ h3 {
 .insurer-button:hover small,
 .insurer-button.active small {
   color: rgba(255, 255, 255, 0.78);
+}
+
+.insurer-category-button:hover span,
+.insurer-category-button.active span {
+  color: white;
 }
 
 .product-search-area {
@@ -611,6 +620,23 @@ button:hover,
   color: rgba(38, 25, 13, 0.62);
   font-size: 0.88rem;
   line-height: 1.6;
+}
+
+.footer-admin-link-row {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.footer-admin-link {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 0.8em;
+}
+
+.footer-admin-link:hover {
+  color: var(--primary-strong);
 }
 
 .hidden {
