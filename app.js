@@ -1,4 +1,9 @@
 const suggestedQueries = [];
+const ADMIN_STORAGE_KEY = "insurance-admin-authenticated";
+const ADMIN_CREDENTIALS = {
+  id: "bankme",
+  password: "bank1234!",
+};
 
 const insurerCategories = [
   { key: "non-life", name: "\uC190\uD574\uBCF4\uD5D8\uD68C\uC0AC", description: "\uD604\uC7AC \uC57D\uAD00\uCC3E\uAE30 \uC9C0\uC6D0 \uBCF4\uD5D8\uC0AC" },
@@ -97,7 +102,90 @@ const elements = {
   lifeInsurerNotice: document.getElementById("life-insurer-notice"),
   adminGrid: document.getElementById("admin-grid"),
   selectedInsurer: document.getElementById("selected-insurer"),
+  adminLoginSection: document.getElementById("admin-login-section"),
+  adminSection: document.getElementById("admin-section"),
+  adminLoginForm: document.getElementById("admin-login-form"),
+  adminIdInput: document.getElementById("admin-id"),
+  adminPasswordInput: document.getElementById("admin-password"),
+  adminLoginMessage: document.getElementById("admin-login-message"),
+  adminLogoutButton: document.getElementById("admin-logout-button"),
 };
+
+function isAdminPage() {
+  return Boolean(elements.adminLoginForm || elements.adminSection);
+}
+
+function isAdminAuthenticated() {
+  return window.localStorage.getItem(ADMIN_STORAGE_KEY) === "true";
+}
+
+function setAdminAuthenticated(value) {
+  if (value) {
+    window.localStorage.setItem(ADMIN_STORAGE_KEY, "true");
+  } else {
+    window.localStorage.removeItem(ADMIN_STORAGE_KEY);
+  }
+}
+
+function setAdminMessage(message, isError = false) {
+  if (!elements.adminLoginMessage) return;
+  if (!message) {
+    elements.adminLoginMessage.textContent = "";
+    elements.adminLoginMessage.classList.add("hidden");
+    elements.adminLoginMessage.classList.remove("error", "success");
+    return;
+  }
+
+  elements.adminLoginMessage.textContent = message;
+  elements.adminLoginMessage.classList.remove("hidden");
+  elements.adminLoginMessage.classList.toggle("error", isError);
+  elements.adminLoginMessage.classList.toggle("success", !isError);
+}
+
+function updateAdminVisibility() {
+  if (!isAdminPage()) return;
+  const authenticated = isAdminAuthenticated();
+  elements.adminLoginSection?.classList.toggle("hidden", authenticated);
+  elements.adminSection?.classList.toggle("hidden", !authenticated);
+
+  if (authenticated) {
+    setAdminMessage("");
+    renderAdmin();
+  } else {
+    elements.adminGrid && (elements.adminGrid.innerHTML = "");
+  }
+}
+
+function handleAdminLogin(event) {
+  event.preventDefault();
+  const enteredId = elements.adminIdInput?.value?.trim() || "";
+  const enteredPassword = elements.adminPasswordInput?.value || "";
+
+  const matches =
+    enteredId === ADMIN_CREDENTIALS.id &&
+    enteredPassword === ADMIN_CREDENTIALS.password;
+
+  if (!matches) {
+    setAdminAuthenticated(false);
+    setAdminMessage("아이디 또는 비밀번호가 올바르지 않습니다.", true);
+    elements.adminPasswordInput?.focus();
+    elements.adminPasswordInput && (elements.adminPasswordInput.value = "");
+    updateAdminVisibility();
+    return;
+  }
+
+  setAdminAuthenticated(true);
+  setAdminMessage("로그인되었습니다.");
+  elements.adminLoginForm?.reset();
+  updateAdminVisibility();
+}
+
+function handleAdminLogout() {
+  setAdminAuthenticated(false);
+  updateAdminVisibility();
+  setAdminMessage("");
+  elements.adminIdInput?.focus();
+}
 
 function normalizeText(value) {
   return value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
@@ -483,10 +571,20 @@ async function handleSearch(query) {
 }
 
 function bindEvents() {
-  elements.form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    handleSearch(elements.input.value);
-  });
+  if (elements.form) {
+    elements.form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      handleSearch(elements.input.value);
+    });
+  }
+
+  if (elements.adminLoginForm) {
+    elements.adminLoginForm.addEventListener("submit", handleAdminLogin);
+  }
+
+  if (elements.adminLogoutButton) {
+    elements.adminLogoutButton.addEventListener("click", handleAdminLogout);
+  }
 
   document.body.addEventListener("click", (event) => {
     const target = event.target;
@@ -511,7 +609,7 @@ function bindEvents() {
         elements.input.value = query;
         handleSearch(query);
       }
-      document.getElementById("results-section").scrollIntoView({ behavior: "smooth", block: "start" });
+      document.getElementById("results-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
 
@@ -571,12 +669,14 @@ function bindEvents() {
 }
 
 function init() {
-  renderSuggestedKeywords();
-  renderInsurerCategoryButtons();
-  renderInsurerButtons();
-  renderAdmin();
-  renderSelectedInsurer();
-  renderResults();
+  if (elements.form) {
+    renderSuggestedKeywords();
+    renderInsurerCategoryButtons();
+    renderInsurerButtons();
+    renderSelectedInsurer();
+    renderResults();
+  }
+  updateAdminVisibility();
   bindEvents();
 }
 
