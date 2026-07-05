@@ -434,6 +434,10 @@ function searchProducts(query) {
   renderResults();
 }
 
+function scrollToResults() {
+  elements.resultsSection?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 function renderResults() {
   const hasResults = state.results.length > 0;
   const showResultsSection = state.hasSearched || state.isSearching;
@@ -559,6 +563,7 @@ async function handleSearch(query) {
   state.rawResults = [];
   state.results = [];
   renderResults();
+  scrollToResults();
   try {
     const payload = await fetchSearchResults(state.query, state.selectedInsurer?.key || null);
     state.rawResults = (payload.results || []).map(toViewModel);
@@ -609,7 +614,7 @@ function bindEvents() {
         elements.input.value = query;
         handleSearch(query);
       }
-      document.getElementById("results-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      scrollToResults();
       return;
     }
 
