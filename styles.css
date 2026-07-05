@@ -36,7 +36,7 @@ body {
 .app-shell {
   width: min(1180px, calc(100% - 32px));
   margin: 0 auto;
-  padding: 24px 0 48px;
+  padding: 24px 0 14px;
 }
 
 .hero,
@@ -94,7 +94,7 @@ p {
 }
 
 h2 {
-  margin-top: 20px;
+  margin-top: 10px;
   font-size: clamp(1.05rem, 2.5vw, 2rem);
   line-height: 1.2;
   max-width: 18em;
@@ -112,7 +112,7 @@ h3 {
 }
 
 .hero-grid {
-  margin-top: 28px;
+  margin-top: 14px;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 24px;
