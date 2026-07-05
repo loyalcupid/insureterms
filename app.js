@@ -459,7 +459,7 @@ function renderResults() {
           <span></span>
           <span></span>
         </div>
-        <p class="meta-line loading-text">열심히 찾고 있어요</p>
+        <p class="meta-line loading-text">보험사에 따라 최대 1분 이상 소요될 수 있습니다.</p>
       </article>
     `;
     return;
