@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
+import tempfile
 import time
 import http.cookiejar
 import mimetypes
@@ -62,6 +64,12 @@ INSURER_REGISTRY = {
         "aliases": ["한화손해보험", "한화손보", "한화화재"],
         "type": "live",
         "official_url": "https://m.hwgeneralins.com/product/catalog/product-info.do",
+    },
+    "aig": {
+        "name": "AIG?먰빐蹂댄뿕",
+        "aliases": ["aig", "aig?먰빐蹂댄뿕", "aig?먮낫", "american international group"],
+        "type": "live",
+        "official_url": "https://www.aig.co.kr/wm/dpwmm001.html",
     },
     "heungkuk": {
         "name": "흥국화재",
@@ -2881,6 +2889,356 @@ class HeungkukAdapter:
         return f"{compact[:4]}-{compact[4:6]}-{compact[6:8]}"
 
 
+class AigAdapter:
+    base = "https://www.aig.co.kr"
+    home_url = f"{base}/wm/dpwmm001.html"
+    product_info_url = f"{base}/js/productInfo.js"
+    service_url = f"{base}/bomservice.do"
+    download_url = f"{base}/downLoadFiles.do"
+    CACHE_SECONDS = 600
+    _catalog_cache: tuple[float, list[dict[str, Any]]] | None = None
+    _product_index_cache: tuple[float, dict[str, dict[str, Any]]] | None = None
+
+    @classmethod
+    def search(cls, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        products: list[dict[str, Any]] = []
+        for item in cls.catalog():
+            score = cls.match_score(
+                query,
+                item["productName"],
+                item.get("displayName", ""),
+                item.get("insuranceType", ""),
+                item.get("productCode", ""),
+            )
+            if score <= 0:
+                continue
+            product = dict(item)
+            product["score"] = score
+            product["documents"] = cls.documents_for_product(product)
+            product["updatedAt"] = product["documents"][0]["revisionDate"] if product["documents"] else None
+            products.append(product)
+
+        return sorted(unique_by(products, "productCode", "productName"), key=result_sort_key)[:limit]
+
+    @staticmethod
+    def match_score(query: str, *values: str) -> int:
+        compact_query = re.sub(r"\s+", "", query or "").lower()
+        if not compact_query:
+            return 0
+        score = 0
+        for value in values:
+            text = str(value or "")
+            compact_value = re.sub(r"\s+", "", text).lower()
+            if compact_query in compact_value:
+                score += 20
+            for token in tokenize(query):
+                compact_token = re.sub(r"\s+", "", token).lower()
+                if compact_token and compact_token in compact_value:
+                    score += 5
+        return score
+
+    @classmethod
+    def catalog(cls) -> list[dict[str, Any]]:
+        cached = cls._catalog_cache
+        now = time.time()
+        if cached and now - cached[0] < cls.CACHE_SECONDS:
+            return [dict(item) for item in cached[1]]
+
+        script = cls.curl_fetch_text(cls.product_info_url)
+        catalog = cls.parse_catalog(script)
+        cls._catalog_cache = (now, catalog)
+        cls._product_index_cache = (now, {item["productCode"]: dict(item) for item in catalog})
+        return [dict(item) for item in catalog]
+
+    @classmethod
+    def product_by_code(cls, product_code: str) -> dict[str, Any] | None:
+        now = time.time()
+        cached = cls._product_index_cache
+        if cached and now - cached[0] < cls.CACHE_SECONDS:
+            item = cached[1].get(product_code)
+            return dict(item) if item else None
+        cls.catalog()
+        cached = cls._product_index_cache
+        if not cached:
+            return None
+        item = cached[1].get(product_code)
+        return dict(item) if item else None
+
+    @classmethod
+    def parse_catalog(cls, script: str) -> list[dict[str, Any]]:
+        current_date = time.strftime("%Y%m%d", time.localtime())
+        histories = cls.parse_js_string_object_array(script, "prodHistList")
+        products = {item.get("prodCd"): item for item in cls.parse_js_string_object_array(script, "prodList")}
+        aliases: dict[str, list[dict[str, Any]]] = {}
+        for item in cls.parse_js_string_object_array(script, "prodAliasList"):
+            aliases.setdefault(item.get("prodCd"), []).append(item)
+        menus = {item.get("prodCd"): item for item in cls.parse_js_string_object_array(script, "prodMenuList")}
+
+        catalog: list[dict[str, Any]] = []
+        for history in histories:
+            product_code = str(history.get("prodCd") or "").strip()
+            if not product_code:
+                continue
+            start_date = str(history.get("stDt") or "")
+            end_date = str(history.get("edDt") or "")
+            if not start_date or not end_date or not (start_date <= current_date < end_date):
+                continue
+
+            product = products.get(product_code)
+            if not product:
+                continue
+            if product.get("mainProd") != "Y":
+                continue
+            if str(product.get("aigYn") or "") not in {"1", "2"}:
+                continue
+
+            alias = cls.primary_alias(aliases.get(product_code, []))
+            menu = menus.get(product_code)
+            if not alias or not menu:
+                continue
+
+            product_name = str(product.get("prodNm") or history.get("prodNm") or "").strip()
+            if not product_name:
+                continue
+
+            catalog.append(
+                {
+                    "provider": "aig",
+                    "insurerName": "AIG?먰빐蹂댄뿕",
+                    "productName": product_name,
+                    "displayName": product_name,
+                    "productCode": product_code,
+                    "insuranceType": cls.infer_insurance_type(product_name, str(alias.get("alias") or "")),
+                    "status": "?먮ℓ以?",
+                    "sourceUrl": cls.product_page_url(
+                        str(alias.get("prodUrl") or ""),
+                        str(alias.get("alias") or ""),
+                        product_code,
+                        str(menu.get("menuId") or ""),
+                    ),
+                    "productUrlPath": str(alias.get("prodUrl") or ""),
+                    "alias": str(alias.get("alias") or ""),
+                    "menuId": str(menu.get("menuId") or ""),
+                    "documents": [],
+                    "saleStartDate": clean_date(start_date),
+                    "saleEndDate": None if end_date == "99991231" else clean_date(end_date),
+                    "updatedAt": None,
+                    "officialSource": "AIG?먰빐蹂댄뿕 ?곹뭹?섏씠吏 諛?듯뭹?쎄? API",
+                }
+            )
+
+        return sorted(catalog, key=lambda item: item["productName"])
+
+    @staticmethod
+    def parse_js_string_object_array(script: str, variable_name: str) -> list[dict[str, Any]]:
+        end_markers = {
+            "prodHistList": "//directYn",
+            "prodList": "var prodAliasList=[",
+            "prodAliasList": "var prodMenuList=[",
+            "prodMenuList": "var prodCallList=[",
+        }
+        start_pattern = rf"var\s+{re.escape(variable_name)}\s*=\s*\["
+        start_match = re.search(start_pattern, script, flags=re.S)
+        if not start_match:
+            return []
+        start_index = start_match.end()
+        end_marker = end_markers.get(variable_name, "];")
+        end_index = script.find(end_marker, start_index)
+        if end_index < 0:
+            end_index = script.find("];", start_index)
+        if end_index < 0:
+            return []
+        block = script[start_index:end_index]
+        block = re.sub(r"^\s*//.*$", "", block, flags=re.M)
+        items: list[dict[str, Any]] = []
+        for chunk in re.findall(r"\{[^{}]*\}", block, flags=re.S):
+            fields = dict(re.findall(r'"([^"]+)"\s*:\s*"([^"]*)"', chunk))
+            if fields:
+                items.append(fields)
+        return items
+
+    @staticmethod
+    def primary_alias(items: list[dict[str, Any]]) -> dict[str, Any] | None:
+        if not items:
+            return None
+        for item in items:
+            if not item.get("partner"):
+                return item
+        return items[0]
+
+    @classmethod
+    def documents_for_product(cls, product: dict[str, Any]) -> list[dict[str, Any]]:
+        try:
+            terms = cls.fetch_terms(str(product.get("productCode") or ""))
+        except Exception:
+            return []
+
+        documents: list[dict[str, Any]] = []
+        for item in terms:
+            if str(item.get("dispYn") or "N") != "Y":
+                continue
+            file_id = str(item.get("fileId") or "").strip()
+            file_seq = str(item.get("fileSeqn") or "1").strip() or "1"
+            if not file_id:
+                continue
+            revision_date = clean_date(str(item.get("stDt") or "")) or product.get("saleStartDate")
+            name = f"{product['productCode']}-{file_seq}.pdf"
+            params = urllib.parse.urlencode(
+                {
+                    "productCode": product["productCode"],
+                    "fileId": file_id,
+                    "fileSeq": file_seq,
+                    "name": name,
+                }
+            )
+            documents.append(
+                {
+                    "type": "蹂댄뿕?쎄?",
+                    "title": name,
+                    "url": f"/api/download/aig?{params}",
+                    "revisionDate": revision_date,
+                    "saleStartDate": product.get("saleStartDate"),
+                    "saleEndDate": product.get("saleEndDate"),
+                    "format": "PDF",
+                }
+            )
+        return documents
+
+    @classmethod
+    def fetch_terms(cls, product_code: str, cookie_file: str | None = None) -> list[dict[str, Any]]:
+        payload = json.dumps({"header": {"txCode": "DPWMS067"}, "payload": {"prodCd": product_code}}, ensure_ascii=False).encode("utf-8")
+        raw = cls.curl_fetch_bytes(
+            cls.service_url,
+            method="POST",
+            data=payload,
+            headers={"Content-Type": "application/json; charset=UTF-8"},
+            cookie_file=cookie_file,
+        )
+        response = json.loads(raw.decode("utf-8", errors="ignore"))
+        if response.get("header", {}).get("RESULT_CODE") != "0":
+            raise ValueError(response.get("header", {}).get("MESSAGE") or "AIG ?쎄? 紐⑸줉 議고쉶?먯꽌 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.")
+        payload_body = response.get("payload") or {}
+        if payload_body.get("respCd") != "0000":
+            raise ValueError(payload_body.get("respMsg") or "AIG ?쎄? 紐⑸줉 議고쉶?먯꽌 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.")
+        return payload_body.get("termsListDto") or []
+
+    @classmethod
+    def download_document(
+        cls,
+        product_code: str,
+        file_id: str | None = None,
+        file_seq: str = "1",
+        preferred_name: str | None = None,
+    ) -> tuple[bytes, str, str]:
+        product = cls.product_by_code(product_code)
+        if not product:
+            raise ValueError("AIG ?곹뭹 ?뺣낫瑜?李얠? 紐삵뻽?듬땲??")
+
+        cookie_file = cls.open_session(product)
+        try:
+            if not file_id:
+                terms = cls.fetch_terms(product_code, cookie_file=cookie_file)
+                visible_terms = [item for item in terms if str(item.get("dispYn") or "N") == "Y" and item.get("fileId")]
+                if not visible_terms:
+                    raise FileNotFoundError("AIG ?곹뭹?쎄? ?뺣낫瑜?李얠? 紐삵뻽?듬땲??")
+                file_id = str(visible_terms[0].get("fileId") or "").strip()
+                file_seq = str(visible_terms[0].get("fileSeqn") or "1").strip() or "1"
+
+            target_url = f"{cls.download_url}?{urllib.parse.urlencode({'fileId': file_id, 'fileSeq': file_seq})}"
+            body = cls.curl_fetch_bytes(
+                target_url,
+                headers={"Referer": str(product.get("sourceUrl") or cls.home_url)},
+                cookie_file=cookie_file,
+            )
+            if not body:
+                raise ValueError("AIG ?쎄? ?ㅼ슫濡쒕뱶?먯꽌 鍮?웾?쓽 ?묎떟??諛쏆븯?듬땲??")
+
+            filename = preferred_name or f"{product_code}-{file_seq}.pdf"
+            return body, filename, "application/pdf"
+        finally:
+            try:
+                os.remove(cookie_file)
+            except OSError:
+                pass
+
+    @classmethod
+    def open_session(cls, product: dict[str, Any]) -> str:
+        temp = tempfile.NamedTemporaryFile(prefix="aig-cookies-", suffix=".txt", delete=False)
+        temp.close()
+        cls.curl_fetch_bytes(str(product.get("sourceUrl") or cls.home_url), cookie_file=temp.name)
+        return temp.name
+
+    @staticmethod
+    def curl_fetch_text(url: str, **kwargs: Any) -> str:
+        return AigAdapter.curl_fetch_bytes(url, **kwargs).decode("utf-8", errors="ignore")
+
+    @staticmethod
+    def curl_fetch_bytes(
+        url: str,
+        *,
+        method: str = "GET",
+        data: bytes | None = None,
+        headers: dict[str, str] | None = None,
+        cookie_file: str | None = None,
+    ) -> bytes:
+        curl_binary = "curl.exe" if os.name == "nt" else "curl"
+        command = [
+            curl_binary,
+            "-L",
+            "--max-time",
+            "30",
+            "-A",
+            USER_AGENT,
+            "-X",
+            method,
+        ]
+        for key, value in (headers or {}).items():
+            command.extend(["-H", f"{key}: {value}"])
+        if cookie_file:
+            command.extend(["-c", cookie_file, "-b", cookie_file])
+        if data is not None:
+            command.extend(["--data-binary", "@-"])
+        command.append(url)
+        result = subprocess.run(
+            command,
+            input=data,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8", errors="ignore").strip()
+            raise ValueError(stderr or f"AIG curl request failed: {url}")
+        return result.stdout
+
+    @classmethod
+    def product_page_url(cls, path: str, alias: str, product_code: str, menu_id: str) -> str:
+        params = urllib.parse.urlencode({"prodAlias": alias, "prodCd": product_code, "menuId": menu_id})
+        return f"{cls.base}{path}?{params}"
+
+    @staticmethod
+    def infer_insurance_type(product_name: str, alias: str) -> str:
+        value = f"{product_name} {alias}".lower()
+        if "암" in product_name:
+            return "??"
+        if "상해" in product_name:
+            return "?곹빐"
+        if "건강" in product_name:
+            return "嫄닿컯"
+        if "간편" in product_name or "ga" in value:
+            return "媛꾪렪"
+        return ""
+
+    @staticmethod
+    def filename_from_disposition(disposition: str) -> str | None:
+        match = re.search(r"filename\*=UTF-8''([^;]+)", disposition, re.I)
+        if match:
+            return urllib.parse.unquote(match.group(1))
+        match = re.search(r'filename="?([^";]+)"?', disposition, re.I)
+        if match:
+            return urllib.parse.unquote(match.group(1))
+        return None
+
+
 def landing_result(provider_key: str, query: str) -> list[dict[str, Any]]:
     config = INSURER_REGISTRY[provider_key]
     return [
@@ -2905,7 +3263,7 @@ def landing_result(provider_key: str, query: str) -> list[dict[str, Any]]:
 
 def search_all(raw_query: str, insurer_key: str | None = None) -> dict[str, Any]:
     context = parse_query(raw_query, insurer_key)
-    provider_keys = [context.insurer_key] if context.insurer_key else ["kb", "db", "hyundai", "samsung", "lotte", "nhfire", "meritz", "heungkuk", "hanwhafire", "mg"]
+    provider_keys = [context.insurer_key] if context.insurer_key else ["kb", "db", "hyundai", "samsung", "lotte", "nhfire", "meritz", "heungkuk", "hanwhafire", "mg", "aig"]
     adapter_limit = 40
     results = []
     errors = []
@@ -2931,6 +3289,8 @@ def search_all(raw_query: str, insurer_key: str | None = None) -> dict[str, Any]
                 results.extend(HanwhaFireAdapter.search(context.product_query, limit=adapter_limit))
             elif provider_key == "mg":
                 results.extend(MgAdapter.search(context.product_query, limit=adapter_limit))
+            elif provider_key == "aig":
+                results.extend(AigAdapter.search(context.product_query, limit=adapter_limit))
             else:
                 results.extend(landing_result(provider_key, context.product_query))
         except Exception as exc:
@@ -3049,6 +3409,28 @@ class AppHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(exc)}, status=502)
                 return
             guessed_type = mimetypes.guess_type(filename)[0] or content_type or "application/octet-stream"
+            self.send_response(200)
+            self.send_header("Content-Type", guessed_type)
+            self.send_header("Content-Disposition", f"inline; filename*=UTF-8''{urllib.parse.quote(filename)}")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if parsed.path in {"/api/download/aig", "/api/aig_download", "/api/aig-download"}:
+            params = urllib.parse.parse_qs(parsed.query)
+            product_code = params.get("productCode", [""])[0].strip()
+            file_id = params.get("fileId", [""])[0].strip() or None
+            file_seq = params.get("fileSeq", ["1"])[0].strip() or "1"
+            original_name = params.get("name", ["aig.pdf"])[0].strip() or "aig.pdf"
+            if not product_code:
+                self.send_json({"error": "productCode is required"}, status=400)
+                return
+            try:
+                body, filename, content_type = AigAdapter.download_document(product_code, file_id, file_seq, original_name)
+            except Exception as exc:
+                self.send_json({"error": str(exc)}, status=502)
+                return
+            guessed_type = mimetypes.guess_type(filename)[0] or content_type or "application/pdf"
             self.send_response(200)
             self.send_header("Content-Type", guessed_type)
             self.send_header("Content-Disposition", f"inline; filename*=UTF-8''{urllib.parse.quote(filename)}")
