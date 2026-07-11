@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -2892,6 +2893,7 @@ class HeungkukAdapter:
 class AigAdapter:
     base = "https://www.aig.co.kr"
     home_url = f"{base}/wm/dpwmm001.html"
+    terms_search_url = f"{base}/wo/dpwot001.html?menuId=MS702"
     product_info_url = f"{base}/js/productInfo.js"
     service_url = f"{base}/bomservice.do"
     download_url = f"{base}/downLoadFiles.do"
@@ -2902,6 +2904,21 @@ class AigAdapter:
     @classmethod
     def search(cls, query: str, limit: int = 10) -> list[dict[str, Any]]:
         products: list[dict[str, Any]] = []
+        seen_keys: set[tuple[str, str]] = set()
+
+        for item in cls.search_disclosures(query):
+            score = cls.match_score(
+                query,
+                item["productName"],
+                item.get("displayName", ""),
+                item.get("insuranceType", ""),
+                item.get("productCode", ""),
+            )
+            product = dict(item)
+            product["score"] = max(score, 50) + 100
+            products.append(product)
+            seen_keys.add((str(product.get("productCode") or ""), str(product.get("productName") or "")))
+
         for item in cls.catalog():
             score = cls.match_score(
                 query,
@@ -2912,6 +2929,9 @@ class AigAdapter:
             )
             if score <= 0:
                 continue
+            key = (str(item.get("productCode") or ""), str(item.get("productName") or ""))
+            if key in seen_keys:
+                continue
             product = dict(item)
             product["score"] = score
             product["documents"] = cls.documents_for_product(product)
@@ -2919,6 +2939,30 @@ class AigAdapter:
             products.append(product)
 
         return sorted(unique_by(products, "productCode", "productName"), key=result_sort_key)[:limit]
+
+    @classmethod
+    def search_disclosures(cls, query: str) -> list[dict[str, Any]]:
+        response = cls.call_service(
+            "DPWOS002",
+            {
+                "useYn": "Y",
+                "pancLrgCfcd": "01",
+                "pancMdimCfcd": "",
+                "prodCd": "",
+                "pdnm": query,
+            },
+        )
+        items = response.get("prodDisclosureList") or []
+        latest_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+        for item in items:
+            product = cls.disclosure_product(item)
+            if not product:
+                continue
+            key = (str(product.get("productCode") or ""), str(product.get("productName") or ""))
+            current = latest_by_key.get(key)
+            if current is None or result_sort_key(product) < result_sort_key(current):
+                latest_by_key[key] = product
+        return list(latest_by_key.values())
 
     @staticmethod
     def match_score(query: str, *values: str) -> int:
@@ -3004,12 +3048,12 @@ class AigAdapter:
             catalog.append(
                 {
                     "provider": "aig",
-                    "insurerName": "AIG?먰빐蹂댄뿕",
+                    "insurerName": "AIG손해보험",
                     "productName": product_name,
                     "displayName": product_name,
                     "productCode": product_code,
                     "insuranceType": cls.infer_insurance_type(product_name, str(alias.get("alias") or "")),
-                    "status": "?먮ℓ以?",
+                    "status": "판매중",
                     "sourceUrl": cls.product_page_url(
                         str(alias.get("prodUrl") or ""),
                         str(alias.get("alias") or ""),
@@ -3023,7 +3067,7 @@ class AigAdapter:
                     "saleStartDate": clean_date(start_date),
                     "saleEndDate": None if end_date == "99991231" else clean_date(end_date),
                     "updatedAt": None,
-                    "officialSource": "AIG?먰빐蹂댄뿕 ?곹뭹?섏씠吏 諛?듯뭹?쎄? API",
+                    "officialSource": "AIG손해보험 상품정보 JS + 공식 API",
                 }
             )
 
@@ -3068,6 +3112,9 @@ class AigAdapter:
 
     @classmethod
     def documents_for_product(cls, product: dict[str, Any]) -> list[dict[str, Any]]:
+        existing_documents = product.get("documents") or []
+        if existing_documents:
+            return [dict(item) for item in existing_documents]
         try:
             terms = cls.fetch_terms(str(product.get("productCode") or ""))
         except Exception:
@@ -3093,7 +3140,7 @@ class AigAdapter:
             )
             documents.append(
                 {
-                    "type": "蹂댄뿕?쎄?",
+                    "type": "보험약관",
                     "title": name,
                     "url": f"/api/download/aig?{params}",
                     "revisionDate": revision_date,
@@ -3105,22 +3152,137 @@ class AigAdapter:
         return documents
 
     @classmethod
+    def disclosure_product(cls, item: dict[str, Any]) -> dict[str, Any] | None:
+        product_code = str(item.get("prodCd") or "").strip()
+        product_name = cls.repair_text(str(item.get("pdnm") or "").strip())
+        if not product_code or not product_name:
+            return None
+
+        catalog_product = cls.product_by_code(product_code) or {}
+        sale_start_date = clean_date(str(item.get("stDt") or "")) or catalog_product.get("saleStartDate")
+        sale_end_date = clean_date(str(item.get("endt") or "")) or catalog_product.get("saleEndDate")
+        file_id = str(item.get("clauFileId") or "").strip()
+        file_seq = str(item.get("clauFileSeqn") or "1").strip() or "1"
+        documents: list[dict[str, Any]] = []
+        if file_id:
+            name = f"{product_code}-{file_seq}.pdf"
+            params = urllib.parse.urlencode(
+                {
+                    "productCode": product_code,
+                    "fileId": file_id,
+                    "fileSeq": file_seq,
+                    "name": name,
+                }
+            )
+            documents.append(
+                {
+                    "type": "보험약관",
+                    "title": name,
+                    "url": f"/api/download/aig?{params}",
+                    "revisionDate": sale_start_date,
+                    "saleStartDate": sale_start_date,
+                    "saleEndDate": sale_end_date,
+                    "format": "PDF",
+                }
+            )
+
+        return {
+            "provider": "aig",
+            "insurerName": "AIG손해보험",
+            "productName": product_name,
+            "displayName": product_name,
+            "productCode": product_code,
+            "insuranceType": catalog_product.get("insuranceType") or cls.infer_insurance_type(product_name, ""),
+            "status": "판매중" if not sale_end_date else "판매중지",
+            "sourceUrl": cls.terms_search_url,
+            "documents": documents,
+            "saleStartDate": sale_start_date,
+            "saleEndDate": sale_end_date,
+            "updatedAt": documents[0]["revisionDate"] if documents else sale_start_date,
+            "officialSource": "AIG손해보험 약관검색 공시 API",
+        }
+
+    @staticmethod
+    def repair_text(value: str | None) -> str:
+        text = str(value or "")
+        if not text:
+            return ""
+        try:
+            repaired = text.encode("latin1").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            return text
+        return repaired if repaired else text
+
+    @classmethod
     def fetch_terms(cls, product_code: str, cookie_file: str | None = None) -> list[dict[str, Any]]:
-        payload = json.dumps({"header": {"txCode": "DPWMS067"}, "payload": {"prodCd": product_code}}, ensure_ascii=False).encode("utf-8")
-        raw = cls.curl_fetch_bytes(
-            cls.service_url,
-            method="POST",
-            data=payload,
-            headers={"Content-Type": "application/json; charset=UTF-8"},
+        response = cls.call_service("DPWMS067", {"prodCd": product_code}, cookie_file=cookie_file)
+        return response.get("termsListDto") or []
+
+    @classmethod
+    def search_disclosures_by_code(cls, product_code: str, cookie_file: str | None = None) -> list[dict[str, Any]]:
+        response = cls.call_service(
+            "DPWOS002",
+            {
+                "useYn": "Y",
+                "pancLrgCfcd": "01",
+                "pancMdimCfcd": "",
+                "prodCd": product_code,
+                "pdnm": "",
+            },
             cookie_file=cookie_file,
         )
+        return response.get("prodDisclosureList") or []
+
+    @classmethod
+    def call_service(
+        cls,
+        tx_code: str,
+        payload: dict[str, Any],
+        *,
+        cookie_file: str | None = None,
+    ) -> dict[str, Any]:
+        request_body = json.dumps({"header": {"txCode": tx_code}, "payload": payload}, ensure_ascii=False)
+        if os.name == "nt":
+            body_b64 = base64.b64encode(request_body.encode("utf-8")).decode("ascii")
+            command = [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                (
+                    f"$body = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{body_b64}')); "
+                    "$resp = Invoke-WebRequest -UseBasicParsing "
+                    f"-Uri '{cls.service_url}' -Method POST "
+                    "-ContentType 'application/json; charset=UTF-8' -Body $body; "
+                    "[Console]::Out.Write($resp.Content)"
+                ),
+            ]
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                raise ValueError(result.stderr.decode("utf-8", errors="ignore").strip() or f"AIG API 호출에 실패했습니다. ({tx_code})")
+            raw = result.stdout
+        else:
+            request = urllib.request.Request(
+                cls.service_url,
+                data=request_body.encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json; charset=UTF-8",
+                    "User-Agent": USER_AGENT,
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=30) as response:
+                raw = response.read()
         response = json.loads(raw.decode("utf-8", errors="ignore"))
         if response.get("header", {}).get("RESULT_CODE") != "0":
-            raise ValueError(response.get("header", {}).get("MESSAGE") or "AIG ?쎄? 紐⑸줉 議고쉶?먯꽌 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.")
+            raise ValueError(response.get("header", {}).get("MESSAGE") or f"AIG API 호출에 실패했습니다. ({tx_code})")
         payload_body = response.get("payload") or {}
-        if payload_body.get("respCd") != "0000":
-            raise ValueError(payload_body.get("respMsg") or "AIG ?쎄? 紐⑸줉 議고쉶?먯꽌 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.")
-        return payload_body.get("termsListDto") or []
+        if payload_body.get("respCd") not in {None, "", "0000"}:
+            raise ValueError(payload_body.get("respMsg") or f"AIG 응답 처리에 실패했습니다. ({tx_code})")
+        return payload_body
 
     @classmethod
     def download_document(
@@ -3130,9 +3292,11 @@ class AigAdapter:
         file_seq: str = "1",
         preferred_name: str | None = None,
     ) -> tuple[bytes, str, str]:
-        product = cls.product_by_code(product_code)
-        if not product:
-            raise ValueError("AIG ?곹뭹 ?뺣낫瑜?李얠? 紐삵뻽?듬땲??")
+        product = cls.product_by_code(product_code) or {
+            "productCode": product_code,
+            "productName": product_code,
+            "sourceUrl": cls.terms_search_url,
+        }
 
         cookie_file = cls.open_session(product)
         try:
@@ -3140,18 +3304,27 @@ class AigAdapter:
                 terms = cls.fetch_terms(product_code, cookie_file=cookie_file)
                 visible_terms = [item for item in terms if str(item.get("dispYn") or "N") == "Y" and item.get("fileId")]
                 if not visible_terms:
-                    raise FileNotFoundError("AIG ?곹뭹?쎄? ?뺣낫瑜?李얠? 紐삵뻽?듬땲??")
+                    visible_terms = [
+                        {
+                            "fileId": item.get("clauFileId"),
+                            "fileSeqn": item.get("clauFileSeqn"),
+                        }
+                        for item in cls.search_disclosures_by_code(product_code, cookie_file=cookie_file)
+                        if item.get("clauFileId")
+                    ]
+                if not visible_terms:
+                    raise FileNotFoundError("AIG 약관 파일 정보를 찾을 수 없습니다.")
                 file_id = str(visible_terms[0].get("fileId") or "").strip()
                 file_seq = str(visible_terms[0].get("fileSeqn") or "1").strip() or "1"
 
             target_url = f"{cls.download_url}?{urllib.parse.urlencode({'fileId': file_id, 'fileSeq': file_seq})}"
             body = cls.curl_fetch_bytes(
                 target_url,
-                headers={"Referer": str(product.get("sourceUrl") or cls.home_url)},
+                headers={"Referer": str(product.get("sourceUrl") or cls.terms_search_url)},
                 cookie_file=cookie_file,
             )
             if not body:
-                raise ValueError("AIG ?쎄? ?ㅼ슫濡쒕뱶?먯꽌 鍮?웾?쓽 ?묎떟??諛쏆븯?듬땲??")
+                raise ValueError("AIG 문서 다운로드에 실패했습니다.")
 
             filename = preferred_name or f"{product_code}-{file_seq}.pdf"
             return body, filename, "application/pdf"
@@ -3165,7 +3338,7 @@ class AigAdapter:
     def open_session(cls, product: dict[str, Any]) -> str:
         temp = tempfile.NamedTemporaryFile(prefix="aig-cookies-", suffix=".txt", delete=False)
         temp.close()
-        cls.curl_fetch_bytes(str(product.get("sourceUrl") or cls.home_url), cookie_file=temp.name)
+        cls.curl_fetch_bytes(str(product.get("sourceUrl") or cls.terms_search_url), cookie_file=temp.name)
         return temp.name
 
     @staticmethod
@@ -3219,13 +3392,13 @@ class AigAdapter:
     def infer_insurance_type(product_name: str, alias: str) -> str:
         value = f"{product_name} {alias}".lower()
         if "암" in product_name:
-            return "??"
+            return "암"
         if "상해" in product_name:
-            return "?곹빐"
+            return "상해"
         if "건강" in product_name:
-            return "嫄닿컯"
+            return "건강"
         if "간편" in product_name or "ga" in value:
-            return "媛꾪렪"
+            return "간편"
         return ""
 
     @staticmethod
