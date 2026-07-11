@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import json
 import os
 import re
@@ -3241,20 +3240,28 @@ class AigAdapter:
         *,
         cookie_file: str | None = None,
     ) -> dict[str, Any]:
-        request_body = json.dumps({"header": {"txCode": tx_code}, "payload": payload}, ensure_ascii=False)
-        if os.name == "nt":
-            body_b64 = base64.b64encode(request_body.encode("utf-8")).decode("ascii")
+        request_body = json.dumps({"header": {"txCode": tx_code}, "payload": payload}, ensure_ascii=False).encode("utf-8")
+        temp = tempfile.NamedTemporaryFile(prefix="aig-service-", suffix=".json", delete=False)
+        try:
+            temp.write(request_body)
+            temp.close()
+
+            curl_binary = "curl.exe" if os.name == "nt" else "curl"
             command = [
-                "powershell",
-                "-NoProfile",
-                "-Command",
-                (
-                    f"$body = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{body_b64}')); "
-                    "$resp = Invoke-WebRequest -UseBasicParsing "
-                    f"-Uri '{cls.service_url}' -Method POST "
-                    "-ContentType 'application/json; charset=UTF-8' -Body $body; "
-                    "[Console]::Out.Write($resp.Content)"
-                ),
+                curl_binary,
+                "-L",
+                "--max-time",
+                "30",
+                "-sS",
+                "-A",
+                USER_AGENT,
+                "-X",
+                "POST",
+                "-H",
+                "Content-Type: application/json; charset=UTF-8",
+                "--data-binary",
+                f"@{temp.name}",
+                cls.service_url,
             ]
             result = subprocess.run(
                 command,
@@ -3264,18 +3271,11 @@ class AigAdapter:
             if result.returncode != 0:
                 raise ValueError(result.stderr.decode("utf-8", errors="ignore").strip() or f"AIG API 호출에 실패했습니다. ({tx_code})")
             raw = result.stdout
-        else:
-            request = urllib.request.Request(
-                cls.service_url,
-                data=request_body.encode("utf-8"),
-                headers={
-                    "Content-Type": "application/json; charset=UTF-8",
-                    "User-Agent": USER_AGENT,
-                },
-                method="POST",
-            )
-            with urllib.request.urlopen(request, timeout=30) as response:
-                raw = response.read()
+        finally:
+            try:
+                os.remove(temp.name)
+            except OSError:
+                pass
         response = json.loads(raw.decode("utf-8", errors="ignore"))
         if response.get("header", {}).get("RESULT_CODE") != "0":
             raise ValueError(response.get("header", {}).get("MESSAGE") or f"AIG API 호출에 실패했습니다. ({tx_code})")
