@@ -135,9 +135,10 @@ def clean_html(value: str) -> str:
 def clean_date(value: str | None) -> str | None:
     if not value:
         return None
-    text = value.strip().replace(".", "")
-    if len(text) != 8 or not text.isdigit():
+    text = re.sub(r"\D", "", value.strip())
+    if len(text) < 8:
         return None
+    text = text[:8]
     return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
 
 
@@ -3201,17 +3202,19 @@ class AigAdapter:
 
     @classmethod
     def search_disclosures(cls, query: str) -> list[dict[str, Any]]:
-        response = cls.call_service(
-            "DPWOS002",
-            {
-                "useYn": "Y",
-                "pancLrgCfcd": "01",
-                "pancMdimCfcd": "",
-                "prodCd": "",
-                "pdnm": query,
-            },
-        )
-        items = response.get("prodDisclosureList") or []
+        items: list[dict[str, Any]] = []
+        for use_yn in ("Y", "N"):
+            response = cls.call_service(
+                "DPWOS002",
+                {
+                    "useYn": use_yn,
+                    "pancLrgCfcd": "01",
+                    "pancMdimCfcd": "",
+                    "prodCd": "",
+                    "pdnm": query,
+                },
+            )
+            items.extend(response.get("prodDisclosureList") or [])
         latest_by_key: dict[tuple[str, str], dict[str, Any]] = {}
         for item in items:
             product = cls.disclosure_product(item)
@@ -3479,18 +3482,21 @@ class AigAdapter:
 
     @classmethod
     def search_disclosures_by_code(cls, product_code: str, cookie_file: str | None = None) -> list[dict[str, Any]]:
-        response = cls.call_service(
-            "DPWOS002",
-            {
-                "useYn": "Y",
-                "pancLrgCfcd": "01",
-                "pancMdimCfcd": "",
-                "prodCd": product_code,
-                "pdnm": "",
-            },
-            cookie_file=cookie_file,
-        )
-        return response.get("prodDisclosureList") or []
+        items: list[dict[str, Any]] = []
+        for use_yn in ("Y", "N"):
+            response = cls.call_service(
+                "DPWOS002",
+                {
+                    "useYn": use_yn,
+                    "pancLrgCfcd": "01",
+                    "pancMdimCfcd": "",
+                    "prodCd": product_code,
+                    "pdnm": "",
+                },
+                cookie_file=cookie_file,
+            )
+            items.extend(response.get("prodDisclosureList") or [])
+        return items
 
     @classmethod
     def call_service(
