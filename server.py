@@ -6,6 +6,7 @@ import re
 import subprocess
 import tempfile
 import time
+import html
 import http.cookiejar
 import mimetypes
 import urllib.parse
@@ -71,6 +72,12 @@ INSURER_REGISTRY = {
         "type": "live",
         "official_url": "https://www.aig.co.kr/wm/dpwmm001.html",
     },
+    "linafire": {
+        "name": "라이나손해보험",
+        "aliases": ["라이나손해보험", "라이나손보", "라이나손해", "chubb", "처브", "에이스손해보험", "ace손해보험", "ace"],
+        "type": "live",
+        "official_url": "https://www.chubb.com/kr-kr/disclosure/product.html",
+    },
     "heungkuk": {
         "name": "흥국화재",
         "aliases": ["흥국화재", "흥국"],
@@ -135,7 +142,7 @@ def clean_date(value: str | None) -> str | None:
 
 
 def extract_href(fragment: str) -> str | None:
-    match = re.search(r'href="([^"]+)"', fragment)
+    match = re.search(r"""href\s*=\s*["']([^"']+)["']""", fragment)
     return match.group(1) if match else None
 
 
@@ -2888,6 +2895,259 @@ class HeungkukAdapter:
             return None
         return f"{compact[:4]}-{compact[4:6]}-{compact[6:8]}"
 
+class LinaFireAdapter:
+    provider = "linafire"
+    insurer_name = "라이나손해보험"
+    base = "https://ec.aceinsurance.co.kr"
+    home_url = "https://www.chubb.com/kr-kr/"
+    disclosure_url = "https://www.chubb.com/kr-kr/disclosure/product.html"
+    selling_url = f"{base}/jsp/acelimited/notice/productNoticeV2.jsp?status=Y"
+    stopped_url = f"{base}/jsp/acelimited/notice/productNoticeV2.jsp?status=N"
+    CACHE_SECONDS = 600
+    _catalog_cache: tuple[float, list[dict[str, Any]]] | None = None
+
+    @classmethod
+    def search(cls, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        matches: list[dict[str, Any]] = []
+        for item in cls.catalog():
+            score = score_text(query, item.get("productName", ""), item.get("insuranceType", ""), item.get("productCode", ""))
+            if score <= 0:
+                continue
+            product = dict(item)
+            product["score"] = score
+            matches.append(product)
+        return sorted(unique_by(matches, "productCode", "productName"), key=result_sort_key)[:limit]
+
+    @classmethod
+    def catalog(cls) -> list[dict[str, Any]]:
+        cached = cls._catalog_cache
+        now = time.time()
+        if cached and now - cached[0] < cls.CACHE_SECONDS:
+            return [dict(item) for item in cached[1]]
+
+        merged: dict[str, dict[str, Any]] = {}
+        page = cls.curl_fetch_text(cls.selling_url)
+        for product in cls.parse_catalog_page(page, "판매중", cls.selling_url):
+            key = str(product.get("productCode") or "")
+            current = merged.get(key)
+            merged[key] = product if current is None else cls.merge_product(current, product)
+
+        try:
+            stopped_page = cls.curl_fetch_text(cls.stopped_url)
+        except Exception:
+            stopped_page = ""
+
+        for status, url, page in (("판매중지", cls.stopped_url, stopped_page),):
+            if not page:
+                continue
+            for product in cls.parse_catalog_page(page, status, url):
+                key = str(product.get("productCode") or "")
+                current = merged.get(key)
+                merged[key] = product if current is None else cls.merge_product(current, product)
+
+        catalog = sorted(merged.values(), key=result_sort_key)
+        cls._catalog_cache = (now, catalog)
+        return [dict(item) for item in catalog]
+
+    @classmethod
+    def merge_product(cls, current: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(current)
+        existing_documents = {str(doc.get("url") or "") for doc in current.get("documents", [])}
+        documents = [dict(doc) for doc in current.get("documents", [])]
+        for doc in incoming.get("documents", []):
+            url = str(doc.get("url") or "")
+            if url and url not in existing_documents:
+                existing_documents.add(url)
+                documents.append(dict(doc))
+
+        documents.sort(key=lambda item: re.sub(r"\D", "", str(item.get("revisionDate") or "")), reverse=True)
+        merged["documents"] = documents
+
+        if cls.recency_key(incoming) >= cls.recency_key(current):
+            merged.update(
+                {
+                    "status": incoming.get("status") or merged.get("status"),
+                    "saleStartDate": incoming.get("saleStartDate") or merged.get("saleStartDate"),
+                    "saleEndDate": incoming.get("saleEndDate"),
+                    "updatedAt": incoming.get("updatedAt") or merged.get("updatedAt"),
+                    "sourceUrl": incoming.get("sourceUrl") or merged.get("sourceUrl"),
+                    "insuranceType": incoming.get("insuranceType") or merged.get("insuranceType"),
+                    "category": incoming.get("category") or merged.get("category"),
+                }
+            )
+
+        if merged.get("status") != "판매중" and any(doc.get("saleEndDate") is None for doc in documents if doc.get("type") == "보험약관"):
+            merged["status"] = "판매중"
+            merged["saleEndDate"] = None
+        return merged
+
+    @staticmethod
+    def recency_key(item: dict[str, Any]) -> int:
+        for value in (item.get("saleStartDate"), item.get("updatedAt"), item.get("saleEndDate")):
+            digits = re.sub(r"\D", "", str(value or ""))
+            if digits:
+                return int(digits[:8])
+        return 0
+
+    @classmethod
+    def parse_catalog_page(cls, page: str, status: str, source_url: str) -> list[dict[str, Any]]:
+        results: dict[str, dict[str, Any]] = {}
+        major_category = ""
+        sub_category = ""
+        token_pattern = re.compile(r"(<h3[^>]*>.*?</h3>|<h4[^>]*>.*?</h4>|<table>.*?</table>)", re.S | re.I)
+
+        for token_match in token_pattern.finditer(page):
+            token = token_match.group(1)
+            lower = token.lower()
+            if lower.startswith("<h3"):
+                major_category = cls.clean_fragment(token)
+                continue
+            if lower.startswith("<h4"):
+                sub_category = cls.clean_fragment(token).lstrip("○").strip()
+                continue
+            if not major_category or not sub_category:
+                continue
+            for product in cls.parse_table(token, major_category, sub_category, status, source_url):
+                key = str(product.get("productCode") or "")
+                current = results.get(key)
+                results[key] = product if current is None else cls.merge_product(current, product)
+
+        return list(results.values())
+
+    @classmethod
+    def parse_table(
+        cls,
+        table_html: str,
+        major_category: str,
+        sub_category: str,
+        status: str,
+        source_url: str,
+    ) -> list[dict[str, Any]]:
+        tbody_match = re.search(r"<tbody>(.*?)</tbody>", table_html, flags=re.S | re.I)
+        if not tbody_match:
+            return []
+
+        rows = re.findall(r"<tr>(.*?)</tr>", tbody_match.group(1), flags=re.S | re.I)
+        grouped: dict[str, dict[str, Any]] = {}
+        current_product_name = ""
+        for row in rows:
+            cells = re.findall(r"<td[^>]*>(.*?)</td>", row, flags=re.S | re.I)
+            if not cells:
+                continue
+
+            cell_index = 0
+            if re.search(r"<td[^>]*rowspan", row, flags=re.I):
+                current_product_name = cls.clean_fragment(cells[0])
+                cell_index = 1
+            if not current_product_name or len(cells) <= cell_index:
+                continue
+
+            sale_start_date, sale_end_date = cls.parse_period(cls.clean_fragment(cells[cell_index]))
+            documents = cls.extract_documents(cells[cell_index + 1 :], sale_start_date, sale_end_date)
+            if not documents:
+                continue
+
+            product_code = cls.product_code(major_category, sub_category, current_product_name)
+            item = {
+                "provider": cls.provider,
+                "insurerName": cls.insurer_name,
+                "productName": current_product_name,
+                "displayName": current_product_name,
+                "productCode": product_code,
+                "insuranceType": sub_category,
+                "category": major_category,
+                "status": "판매중" if sale_end_date is None else status,
+                "sourceUrl": source_url,
+                "documents": documents,
+                "saleStartDate": sale_start_date,
+                "saleEndDate": sale_end_date,
+                "updatedAt": sale_start_date,
+                "officialSource": "라이나손해보험 상품공시 HTML 크롤링",
+            }
+            current = grouped.get(product_code)
+            grouped[product_code] = item if current is None else cls.merge_product(current, item)
+
+        return list(grouped.values())
+
+    @classmethod
+    def extract_documents(
+        cls,
+        cells: list[str],
+        sale_start_date: str | None,
+        sale_end_date: str | None,
+    ) -> list[dict[str, Any]]:
+        documents: list[dict[str, Any]] = []
+        for doc_type, cell in zip(("사업방법서", "보험약관", "상품요약서"), cells):
+            href = extract_href(cell)
+            if not href:
+                continue
+            url = urllib.parse.urljoin(cls.base, html.unescape(href))
+            documents.append(
+                {
+                    "type": doc_type,
+                    "title": cls.document_filename(url, doc_type),
+                    "url": url,
+                    "revisionDate": cls.document_revision_date(url) or sale_start_date,
+                    "saleStartDate": sale_start_date,
+                    "saleEndDate": sale_end_date,
+                    "format": "PDF",
+                }
+            )
+        return documents
+
+    @staticmethod
+    def document_filename(url: str, doc_type: str) -> str:
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        file_name = params.get("fileName", [""])[0]
+        decoded = urllib.parse.unquote(file_name).strip()
+        return decoded or f"{doc_type}.pdf"
+
+    @classmethod
+    def document_revision_date(cls, url: str) -> str | None:
+        decoded = cls.document_filename(url, "")
+        for digits in re.findall(r"(20\d{6})", decoded):
+            cleaned = clean_date(digits)
+            if cleaned:
+                return cleaned
+        return None
+
+    @staticmethod
+    def parse_period(text: str) -> tuple[str | None, str | None]:
+        parts = [part.strip() for part in text.split("~", 1)]
+        start_date = clean_date(parts[0]) if parts else None
+        if len(parts) < 2 or "현재" in parts[1]:
+            return start_date, None
+        return start_date, clean_date(parts[1])
+
+    @staticmethod
+    def clean_fragment(fragment: str) -> str:
+        value = clean_html(html.unescape(fragment or ""))
+        return re.sub(r"\s+", " ", value).strip()
+
+    @staticmethod
+    def product_code(major_category: str, sub_category: str, product_name: str) -> str:
+        normalized = normalize_text(f"{major_category} {sub_category} {product_name}")
+        return f"linafire-{normalized}"
+
+    @staticmethod
+    def curl_fetch_text(url: str) -> str:
+        curl_binary = "curl.exe" if os.name == "nt" else "curl"
+        command = [
+            curl_binary,
+            "-L",
+            "--max-time",
+            "60",
+            "-A",
+            USER_AGENT,
+            url,
+        ]
+        result = subprocess.run(command, capture_output=True, check=False)
+        if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8", errors="ignore").strip()
+            raise ValueError(stderr or f"LinaFire curl request failed: {url}")
+        return result.stdout.decode("utf-8", errors="ignore")
+
 
 class AigAdapter:
     base = "https://www.aig.co.kr"
@@ -3436,7 +3696,7 @@ def landing_result(provider_key: str, query: str) -> list[dict[str, Any]]:
 
 def search_all(raw_query: str, insurer_key: str | None = None) -> dict[str, Any]:
     context = parse_query(raw_query, insurer_key)
-    provider_keys = [context.insurer_key] if context.insurer_key else ["kb", "db", "hyundai", "samsung", "lotte", "nhfire", "meritz", "heungkuk", "hanwhafire", "mg", "aig"]
+    provider_keys = [context.insurer_key] if context.insurer_key else ["kb", "db", "hyundai", "samsung", "lotte", "nhfire", "meritz", "heungkuk", "hanwhafire", "mg", "aig", "linafire"]
     adapter_limit = 40
     results = []
     errors = []
@@ -3464,6 +3724,8 @@ def search_all(raw_query: str, insurer_key: str | None = None) -> dict[str, Any]
                 results.extend(MgAdapter.search(context.product_query, limit=adapter_limit))
             elif provider_key == "aig":
                 results.extend(AigAdapter.search(context.product_query, limit=adapter_limit))
+            elif provider_key == "linafire":
+                results.extend(LinaFireAdapter.search(context.product_query, limit=adapter_limit))
             else:
                 results.extend(landing_result(provider_key, context.product_query))
         except Exception as exc:
